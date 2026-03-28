@@ -1,0 +1,1137 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>WeinKeller</title>
+
+<!-- ================================================================
+     WEINKELLER — Google Sheets Edition
+     Daten werden direkt aus Google Sheets geladen und gespeichert.
+
+     EINRICHTUNG (einmalig, 2 Minuten):
+     1. Gehe zu https://console.cloud.google.com/
+     2. Neues Projekt erstellen → APIs & Dienste → Bibliothek
+     3. "Google Sheets API" aktivieren
+     4. "Google Identity Services" aktivieren
+     5. APIs & Dienste → Anmeldedaten → OAuth 2.0-Client-ID erstellen
+        → Anwendungstyp: Webanwendung
+        → Autorisierte JS-Quellen: füge "null" und deine Datei-URL hinzu
+        (oder für lokale Datei: http://localhost)
+     6. Client-ID kopieren und unten bei CLIENT_ID eintragen
+     7. SPREADSHEET_ID ist bereits vorausgefüllt
+
+     ALTERNATIV (einfacher): Google API Key für öffentliche Sheets
+     → Für private Sheets brauchst du OAuth (wie oben)
+================================================================ -->
+
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f7f4f0; --surface: #fffcf9; --border: #e2d9d0;
+  --text: #1e0f14; --muted: #7a6670;
+  --primary: #6b1a2e; --primary-fg: #f7f4f0;
+  --accent: #c8860a; --accent-fg: #1e0f14;
+  --rot: #991b1b; --rot-bg: #fde8e8;
+  --weiss-c: #854d0e; --weiss-bg: #fefce8;
+  --rose-c: #9d174d; --rose-bg: #fce7f3;
+  --orange-c: #c2410c; --orange-bg: #fff7ed;
+  --sekt-c: #1d4ed8; --sekt-bg: #eff6ff;
+  --danger: #b91c1c; --radius: 10px;
+  --sidebar-w: 210px; --shadow: 0 2px 12px rgba(30,15,20,0.08);
+}
+.dark {
+  --bg: #160a0e; --surface: #1f1014; --border: #3a2230;
+  --text: #f0e8ec; --muted: #9a7f88;
+  --primary: #9a2d48; --primary-fg: #f0e8ec;
+  --accent: #d4950f;
+  --rot: #f87171; --rot-bg: #3f1212;
+  --weiss-c: #fbbf24; --weiss-bg: #3f2f04;
+  --rose-c: #f472b6; --rose-bg: #3f0a27;
+  --orange-c: #fb923c; --orange-bg: #3f1a06;
+  --sekt-c: #60a5fa; --sekt-bg: #0a1e3f;
+  --shadow: 0 2px 12px rgba(0,0,0,0.4);
+}
+html,body{height:100%;font-family:-apple-system,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;}
+button{cursor:pointer;font:inherit;}
+input,textarea,select{font:inherit;background:var(--surface);color:var(--text);border:1.5px solid var(--border);border-radius:var(--radius);padding:8px 12px;width:100%;outline:none;transition:border-color .15s;}
+input:focus,textarea:focus,select:focus{border-color:var(--primary);}
+label{font-size:.82rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:4px;}
+textarea{resize:vertical;min-height:75px;}
+h1{font-size:1.25rem;font-weight:700;}
+h2{font-size:.95rem;font-weight:700;}
+
+/* Layout */
+#app{display:flex;min-height:100vh;}
+#sidebar{width:var(--sidebar-w);min-height:100vh;flex-shrink:0;background:var(--primary);color:var(--primary-fg);display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;z-index:100;}
+#main{margin-left:var(--sidebar-w);flex:1;padding:22px 26px;max-width:960px;}
+@media(max-width:660px){
+  #sidebar{position:static;width:100%;min-height:auto;flex-direction:row;flex-wrap:wrap;align-items:center;padding:8px 12px;gap:6px;}
+  #sidebar .logo{flex:1;border-bottom:none;padding:4px 0;}
+  #sidebar nav{display:flex;flex-direction:row;gap:3px;padding:0;}
+  #sidebar .sfooter{display:none;}
+  #main{margin-left:0;padding:14px;}
+  #app{flex-direction:column;}
+}
+.logo{padding:18px 14px 10px;display:flex;align-items:center;gap:9px;border-bottom:1px solid rgba(255,255,255,.15);}
+.logo-text{font-size:1.05rem;font-weight:800;letter-spacing:-.02em;}
+nav{padding:8px 6px;flex:1;display:flex;flex-direction:column;gap:2px;}
+.nav-btn{display:flex;align-items:center;gap:9px;padding:9px 11px;border-radius:8px;border:none;background:transparent;color:rgba(255,255,255,.72);font-size:.88rem;font-weight:500;width:100%;text-align:left;transition:background .12s,color .12s;}
+.nav-btn:hover{background:rgba(255,255,255,.12);color:#fff;}
+.nav-btn.active{background:var(--accent);color:var(--accent-fg);font-weight:700;}
+.sfooter{padding:10px 6px;border-top:1px solid rgba(255,255,255,.15);display:flex;flex-direction:column;gap:5px;}
+.last-saved-box{font-size:.72rem;color:rgba(255,255,255,.48);line-height:1.45;padding:0 6px;}
+.last-saved-box strong{color:rgba(255,255,255,.72);}
+#theme-btn{display:flex;align-items:center;gap:7px;padding:8px 11px;background:none;border:none;color:rgba(255,255,255,.6);font-size:.83rem;border-radius:8px;width:100%;}
+#theme-btn:hover{background:rgba(255,255,255,.1);color:#fff;}
+
+/* Buttons */
+.btn{display:inline-flex;align-items:center;gap:5px;padding:7px 15px;border-radius:var(--radius);border:1.5px solid transparent;font-weight:600;font-size:.85rem;transition:opacity .12s,transform .08s;}
+.btn:active{transform:scale(.97);}
+.btn-primary{background:var(--primary);color:var(--primary-fg);}
+.btn-primary:hover{opacity:.88;}
+.btn-outline{background:transparent;border-color:var(--border);color:var(--text);}
+.btn-outline:hover{background:var(--border);}
+.btn-danger{background:var(--danger);color:#fff;}
+.btn-ghost{background:transparent;border-color:transparent;color:var(--muted);}
+.btn-ghost:hover{color:var(--text);background:var(--border);}
+.btn-icon{padding:5px;border-radius:7px;border:1.5px solid var(--border);background:var(--surface);color:var(--text);display:inline-flex;align-items:center;justify-content:center;transition:background .12s;}
+.btn-icon:hover{background:var(--border);}
+.btn-icon:disabled{opacity:.35;cursor:not-allowed;}
+.btn-sm{padding:5px 10px;font-size:.78rem;}
+.btn-full{width:100%;justify-content:center;padding:11px;}
+
+/* Page */
+.page-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:8px;}
+.page-header p{font-size:.85rem;color:var(--muted);margin-top:2px;}
+.back-btn{display:inline-flex;align-items:center;gap:5px;color:var(--muted);font-size:.85rem;font-weight:600;border:none;background:none;padding:0;margin-bottom:10px;}
+.back-btn:hover{color:var(--text);}
+
+/* Filters */
+.filters{display:flex;gap:7px;margin-bottom:16px;flex-wrap:wrap;align-items:center;}
+.filters input{max-width:230px;}
+.filters select{max-width:150px;width:auto;}
+.view-toggle{display:flex;border:1.5px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-left:auto;}
+.view-toggle button{border:none;background:transparent;padding:6px 9px;color:var(--muted);transition:background .12s;}
+.view-toggle button.active{background:var(--primary);color:var(--primary-fg);}
+
+/* Wine grid / list */
+.wine-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:12px;}
+@media(max-width:480px){.wine-grid{grid-template-columns:repeat(2,1fr);}}
+.wine-card{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);overflow:hidden;cursor:pointer;transition:transform .15s,box-shadow .15s;}
+.wine-card:hover{transform:translateY(-2px);box-shadow:var(--shadow);}
+.wine-card-photo{height:140px;background:repeating-linear-gradient(45deg,var(--bg),var(--bg) 4px,var(--surface) 4px,var(--surface) 12px);position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden;}
+.wine-card-photo img{width:100%;height:100%;object-fit:cover;}
+.no-photo{opacity:.18;}
+.card-badges{position:absolute;top:6px;left:6px;}
+.card-bestand{position:absolute;top:6px;right:6px;background:rgba(255,255,255,.88);backdrop-filter:blur(4px);border-radius:20px;padding:2px 7px;font-size:.72rem;font-weight:700;border:1px solid var(--border);}
+.dark .card-bestand{background:rgba(30,15,20,.85);}
+.card-bestand.empty{color:var(--danger);}
+.wine-card-body{padding:9px 10px 10px;}
+.wine-card-name{font-weight:700;font-size:.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.wine-card-sub{font-size:.76rem;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.wine-card-ctrls{display:flex;align-items:center;gap:5px;margin-top:8px;}
+.wine-card-ctrls span{font-weight:700;font-size:.92rem;width:20px;text-align:center;}
+.wine-list{display:flex;flex-direction:column;gap:6px;}
+.wine-row{display:flex;align-items:center;gap:11px;padding:9px 11px;background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:background .12s;}
+.wine-row:hover{background:var(--bg);}
+.wine-row-thumb{width:40px;height:54px;flex-shrink:0;border-radius:6px;overflow:hidden;background:repeating-linear-gradient(45deg,var(--bg),var(--bg) 3px,var(--surface) 3px,var(--surface) 8px);display:flex;align-items:center;justify-content:center;}
+.wine-row-thumb img{width:100%;height:100%;object-fit:cover;}
+.wine-row-info{flex:1;min-width:0;}
+.wine-row-name{font-weight:700;font-size:.88rem;}
+.wine-row-sub{font-size:.76rem;color:var(--muted);margin-top:2px;}
+.wine-row-ctrls{display:flex;align-items:center;gap:5px;flex-shrink:0;}
+.wine-row-ctrls span{font-weight:700;min-width:22px;text-align:center;}
+
+/* Badges */
+.badge{display:inline-flex;align-items:center;padding:1px 8px;border-radius:20px;font-size:.7rem;font-weight:700;border:1px solid;}
+.badge-weiss{background:var(--weiss-bg);color:var(--weiss-c);border-color:var(--weiss-c);}
+.badge-rot{background:var(--rot-bg);color:var(--rot);border-color:var(--rot);}
+.badge-rosé,.badge-rose{background:var(--rose-bg);color:var(--rose-c);border-color:var(--rose-c);}
+.badge-orange{background:var(--orange-bg);color:var(--orange-c);border-color:var(--orange-c);}
+.badge-sekt{background:var(--sekt-bg);color:var(--sekt-c);border-color:var(--sekt-c);}
+
+/* Stars */
+.stars{display:flex;gap:1px;}
+.star{font-size:.95rem;color:var(--border);cursor:pointer;transition:color .1s;line-height:1;}
+.star.filled{color:var(--accent);}
+.stars.ro .star{cursor:default;}
+
+/* Detail */
+.detail-hero{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);overflow:hidden;display:flex;margin-bottom:14px;}
+.detail-photos{display:flex;flex-shrink:0;}
+.detail-photo{width:120px;height:190px;background:repeating-linear-gradient(45deg,var(--bg),var(--bg) 4px,var(--surface) 4px,var(--surface) 12px);display:flex;align-items:center;justify-content:center;overflow:hidden;border-right:1px solid var(--border);}
+.detail-photo img{width:100%;height:100%;object-fit:cover;}
+.detail-info{flex:1;padding:16px 18px;display:flex;flex-direction:column;gap:11px;min-width:0;}
+.detail-year{font-size:1.9rem;font-weight:800;color:var(--primary);line-height:1;}
+.detail-name{font-size:1.05rem;font-weight:800;}
+.detail-weingut{color:var(--muted);font-size:.88rem;}
+.bestand-row{display:flex;align-items:center;gap:7px;}
+.bestand-num{font-size:1.35rem;font-weight:800;min-width:30px;text-align:center;}
+.bestand-num.empty{color:var(--danger);}
+.detail-card{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:14px 16px;margin-bottom:12px;}
+.detail-card h2{font-size:.75rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:11px;}
+.dfields{display:grid;grid-template-columns:1fr 1fr;gap:10px 22px;}
+@media(max-width:480px){.dfields{grid-template-columns:1fr;}.detail-hero{flex-direction:column;}.detail-photo{width:100%;height:170px;}}
+.dfield dt{font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:600;}
+.dfield dd{font-size:.88rem;margin-top:1px;}
+.detail-actions{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px;}
+
+/* Form */
+.form-section{margin-bottom:20px;}
+.fsect-title{font-size:.75rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700;margin-bottom:10px;padding-bottom:5px;border-bottom:1px solid var(--border);}
+.fgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.fgrid.c3{grid-template-columns:1fr 1fr 1fr;}
+@media(max-width:580px){.fgrid,.fgrid.c3{grid-template-columns:1fr;}}
+.fgroup{display:flex;flex-direction:column;}
+.fgroup.s2{grid-column:span 2;}
+@media(max-width:580px){.fgroup.s2{grid-column:span 1;}}
+.req{color:var(--danger);}
+.sig-preview{background:var(--bg);border:1px solid var(--border);border-radius:7px;padding:7px 11px;font-size:.75rem;font-family:monospace;color:var(--muted);margin-bottom:14px;word-break:break-all;}
+
+/* Photo upload */
+.photo-row{display:flex;gap:14px;flex-wrap:wrap;}
+.photo-box{display:flex;flex-direction:column;gap:5px;}
+.photo-box label{font-size:.82rem;}
+.photo-drop{width:105px;height:135px;border:2px dashed var(--border);border-radius:var(--radius);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;cursor:pointer;background:var(--bg);transition:border-color .15s;font-size:.75rem;color:var(--muted);text-align:center;line-height:1.3;position:relative;overflow:hidden;}
+.photo-drop:hover{border-color:var(--primary);}
+.photo-drop img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
+.photo-drop .rm-ph{position:absolute;top:3px;right:3px;background:var(--danger);color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:11px;display:none;align-items:center;justify-content:center;z-index:2;}
+.photo-drop:hover .rm-ph{display:flex;}
+.ocr-btn{font-size:.74rem;}
+.ocr-out{font-size:.73rem;font-family:monospace;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 8px;max-height:90px;overflow:auto;white-space:pre-wrap;color:var(--muted);}
+
+/* Status bar */
+#status-bar{display:flex;align-items:center;gap:8px;background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:8px 14px;margin-bottom:16px;font-size:.82rem;}
+#status-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+.dot-ok{background:#16a34a;}
+.dot-loading{background:var(--accent);animation:pulse 1s infinite;}
+.dot-err{background:var(--danger);}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:.4;}}
+
+/* Auth overlay */
+#auth-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:500;display:flex;align-items:center;justify-content:center;padding:20px;}
+.auth-card{background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:30px;max-width:420px;width:100%;text-align:center;display:flex;flex-direction:column;gap:14px;}
+.auth-card h2{font-size:1.1rem;}
+.auth-card p{color:var(--muted);font-size:.88rem;line-height:1.5;}
+.auth-card .setup-steps{text-align:left;background:var(--bg);border-radius:8px;padding:12px 16px;font-size:.82rem;line-height:1.8;}
+
+/* Toast */
+#toast{position:fixed;bottom:22px;right:22px;z-index:9999;background:var(--text);color:var(--bg);padding:10px 16px;border-radius:var(--radius);font-size:.85rem;font-weight:600;box-shadow:0 4px 20px rgba(0,0,0,.25);pointer-events:none;opacity:0;transform:translateY(8px);transition:opacity .2s,transform .2s;max-width:300px;}
+#toast.show{opacity:1;transform:translateY(0);}
+#toast.err{background:var(--danger);color:#fff;}
+
+/* Dialog */
+.dialog-back{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:flex;align-items:center;justify-content:center;padding:20px;}
+.dialog{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:22px;max-width:380px;width:100%;}
+.dialog h2{margin-bottom:7px;}
+.dialog p{color:var(--muted);font-size:.88rem;margin-bottom:18px;}
+.dialog-acts{display:flex;gap:7px;justify-content:flex-end;}
+
+/* Empty */
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:50px 20px;gap:12px;text-align:center;}
+.empty svg{opacity:.17;}
+.empty p{color:var(--muted);}
+
+/* Config panel */
+#config-panel{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:18px;display:none;}
+#config-panel h2{margin-bottom:12px;font-size:.9rem;}
+.config-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+@media(max-width:580px){.config-fields{grid-template-columns:1fr;}}
+</style>
+</head>
+<body>
+
+<!-- ================================================================
+  KONFIGURATION — hier einmalig ausfüllen
+================================================================ -->
+<script>
+// ----------------------------------------------------------------
+// SCHRITT 1: Deine Google Cloud OAuth Client-ID hier eintragen
+//   → https://console.cloud.google.com → APIs & Dienste → Anmeldedaten
+const CLIENT_ID = '949878246740-v8s85mh4kpd5l87b09uavig8uqflsvaf.apps.googleusercontent.com';
+
+// SCHRITT 2: Diese Spreadsheet-ID ist bereits vorausgefüllt — nicht ändern!
+const SPREADSHEET_ID = '1l0p0ce5wicnw9Oa_55MwuFLpbPqBuLsZlQ32fPDpJa0';
+
+// SCHRITT 3: Tabellenblatt-Name (Standard: Tabellenblatt1)
+const SHEET_NAME = 'Tabellenblatt1';
+// ----------------------------------------------------------------
+</script>
+
+<div id="app">
+  <aside id="sidebar">
+    <div class="logo">
+      <svg width="30" height="30" viewBox="0 0 32 32" fill="none">
+        <circle cx="16" cy="16" r="15" fill="rgba(255,255,255,0.15)"/>
+        <path d="M11 7h10l-2.5 8a4.5 4.5 0 01-5 0L11 7z" fill="#d4950f"/>
+        <rect x="14.5" y="18" width="3" height="5" fill="#d4950f"/>
+        <rect x="11" y="23" width="10" height="1.5" rx="0.75" fill="#d4950f"/>
+      </svg>
+      <span class="logo-text">WeinKeller</span>
+    </div>
+    <nav>
+      <button class="nav-btn active" id="nav-inv" onclick="showPage('inventar')">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        Inventar
+      </button>
+      <button class="nav-btn" id="nav-neu" onclick="showPage('form')">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+        Neuer Wein
+      </button>
+      <button class="nav-btn" id="nav-cfg" onclick="toggleConfig()">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93l-1.41 1.41M4.93 4.93l1.41 1.41M12 2v2M12 20v2M2 12h2M20 12h2M19.07 19.07l-1.41-1.41M4.93 19.07l1.41-1.41"/></svg>
+        Einstellungen
+      </button>
+    </nav>
+    <div class="sfooter">
+      <div class="last-saved-box">Sheets:<br><strong id="sheet-link-short">Wird geladen…</strong></div>
+      <div class="last-saved-box" style="margin-top:2px">Letzt. Sync:<br><strong id="last-sync">–</strong></div>
+      <button id="theme-btn" onclick="toggleTheme()">
+        <span id="theme-icon">🌙</span> <span id="theme-lbl">Dunkelmodus</span>
+      </button>
+    </div>
+  </aside>
+
+  <main id="main">
+
+    <!-- STATUS BAR -->
+    <div id="status-bar">
+      <div id="status-dot" class="dot-loading"></div>
+      <span id="status-text">Verbinde mit Google Sheets…</span>
+      <button class="btn btn-outline btn-sm" onclick="loadFromSheets()" style="margin-left:auto" id="reload-btn">
+        <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+        Neu laden
+      </button>
+    </div>
+
+    <!-- CONFIG PANEL -->
+    <div id="config-panel">
+      <h2>Einstellungen</h2>
+      <div class="config-fields">
+        <div class="fgroup">
+          <label>Google OAuth Client-ID</label>
+          <input type="text" id="cfg-client-id" placeholder="xxxx.apps.googleusercontent.com">
+        </div>
+        <div class="fgroup">
+          <label>Spreadsheet-ID (bereits gesetzt)</label>
+          <input type="text" id="cfg-sheet-id" value="1l0p0ce5wicnw9Oa_55MwuFLpbPqBuLsZlQ32fPDpJa0" readonly style="font-family:monospace;font-size:.78rem;">
+        </div>
+      </div>
+      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-primary btn-sm" onclick="saveConfig()">Speichern & verbinden</button>
+        <a href="https://docs.google.com/spreadsheets/d/1l0p0ce5wicnw9Oa_55MwuFLpbPqBuLsZlQ32fPDpJa0/edit" target="_blank" class="btn btn-outline btn-sm">
+          <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+          Sheet öffnen
+        </a>
+        <button class="btn btn-outline btn-sm" onclick="exportSnapshot()">
+          <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Snapshot-HTML
+        </button>
+      </div>
+      <div style="margin-top:12px;background:var(--bg);border-radius:8px;padding:11px 14px;font-size:.78rem;line-height:1.7;color:var(--muted);">
+        <strong style="color:var(--text)">📋 Einmalige Einrichtung (5 Min.):</strong><br>
+        1. <a href="https://console.cloud.google.com/" target="_blank" style="color:var(--primary)">Google Cloud Console</a> öffnen<br>
+        2. Neues Projekt → <strong>APIs &amp; Dienste → Bibliothek → "Google Sheets API" aktivieren</strong><br>
+        3. Anmeldedaten → OAuth 2.0-Client-ID → Webanwendung<br>
+        4. Autorisierte JS-Quellen: <code style="background:var(--border);padding:1px 5px;border-radius:4px">null</code> hinzufügen (für lokale HTML-Datei)<br>
+        ✅ Client-ID ist bereits eingetragen — nur noch Schritt 4 nötig!
+      </div>
+    </div>
+
+    <!-- INVENTAR PAGE -->
+    <section id="page-inventar">
+      <div class="page-header">
+        <div><h1>Inventar</h1><p id="stats-line">–</p></div>
+        <a href="https://docs.google.com/spreadsheets/d/1l0p0ce5wicnw9Oa_55MwuFLpbPqBuLsZlQ32fPDpJa0/edit" target="_blank" class="btn btn-outline btn-sm">
+          <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+          Google Sheet
+        </a>
+      </div>
+      <div class="filters">
+        <input type="search" id="s-input" placeholder="🔍 Name, Weingut, Region…" oninput="renderInventar()" style="max-width:220px">
+        <select id="f-typ" onchange="renderInventar()">
+          <option value="">Alle Typen</option>
+          <option>Weiss</option><option>Rot</option><option>Rosé</option><option>Orange</option><option>Sekt</option>
+        </select>
+        <div class="view-toggle">
+          <button id="vg-btn" class="active" onclick="setView('grid')" title="Raster">
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          </button>
+          <button id="vl-btn" onclick="setView('list')" title="Liste">
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+          </button>
+        </div>
+      </div>
+      <div id="wine-container"></div>
+    </section>
+
+    <!-- FORM PAGE -->
+    <section id="page-form" style="display:none">
+      <button class="back-btn" onclick="showPage('inventar')">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+        Zurück
+      </button>
+      <div class="page-header">
+        <div><h1 id="form-title">Neuer Wein</h1><p id="form-sub" style="color:var(--muted)">Wein zum Inventar hinzufügen</p></div>
+      </div>
+      <form id="wein-form" onsubmit="submitForm(event)">
+
+        <div class="form-section">
+          <div class="fsect-title">Fotos</div>
+          <div class="photo-row">
+            <div class="photo-box">
+              <label>Foto vorne</label>
+              <div class="photo-drop" id="drop-v" onclick="document.getElementById('fv').click()">
+                <svg width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                <span>Foto hochladen</span>
+                <button type="button" class="rm-ph" onclick="rmPhoto('v',event)">✕</button>
+                <input type="file" id="fv" accept="image/*" capture="environment" onchange="handlePhoto('v',this)" style="display:none">
+              </div>
+              <button type="button" class="btn btn-outline btn-sm ocr-btn" id="ocr-v-btn" onclick="doOCR('v')" style="display:none">🔍 OCR Vorne</button>
+              <div id="ocr-v-out" class="ocr-out" style="display:none"></div>
+            </div>
+            <div class="photo-box">
+              <label>Foto hinten</label>
+              <div class="photo-drop" id="drop-h" onclick="document.getElementById('fh').click()">
+                <svg width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                <span>Foto hochladen</span>
+                <button type="button" class="rm-ph" onclick="rmPhoto('h',event)">✕</button>
+                <input type="file" id="fh" accept="image/*" capture="environment" onchange="handlePhoto('h',this)" style="display:none">
+              </div>
+              <button type="button" class="btn btn-outline btn-sm ocr-btn" id="ocr-h-btn" onclick="doOCR('h')" style="display:none">🔍 OCR Hinten</button>
+              <div id="ocr-h-out" class="ocr-out" style="display:none"></div>
+            </div>
+          </div>
+          <p style="font-size:.75rem;color:var(--muted);margin-top:8px">⚠️ Fotos werden lokal im Browser gespeichert, nicht in Google Sheets (zu gross für Sheets).</p>
+        </div>
+
+        <div class="form-section">
+          <div class="fsect-title">Basisdaten <span class="req">*</span></div>
+          <div class="fgrid">
+            <div class="fgroup"><label>Name <span class="req">*</span></label><input type="text" id="fn" placeholder="z.B. Pinot Noir Reserve" oninput="updSig()" required></div>
+            <div class="fgroup"><label>Weingut <span class="req">*</span></label><input type="text" id="fwg" placeholder="z.B. Château Margaux" oninput="updSig()" required></div>
+            <div class="fgroup"><label>Weintyp <span class="req">*</span></label>
+              <select id="fwt" required>
+                <option value="">— wählen —</option>
+                <option>Weiss</option><option>Rot</option><option>Rosé</option><option>Orange</option><option>Sekt</option>
+              </select>
+            </div>
+            <div class="fgroup"><label>Jahrgang <span class="req">*</span></label><input type="number" id="fjg" min="1800" max="2100" placeholder="2022" oninput="updSig()" required></div>
+            <div class="fgroup"><label>Füllmenge <span class="req">*</span></label><input type="text" id="ffm" placeholder="75 cl" oninput="updSig()" required></div>
+            <div class="fgroup"><label>Bestand <span class="req">*</span></label><input type="number" id="fbs" min="0" value="1" required></div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="fsect-title">Herkunft & Rebsorten</div>
+          <div class="fgrid">
+            <div class="fgroup s2"><label>Traubensorten</label><input type="text" id="ftr" placeholder="Pinot Noir, Merlot…"></div>
+            <div class="fgroup"><label>Land</label><input type="text" id="fla" placeholder="Frankreich"></div>
+            <div class="fgroup"><label>Region</label><input type="text" id="frg" placeholder="Burgund"></div>
+            <div class="fgroup"><label>Appellation</label><input type="text" id="fap" placeholder="Côte de Nuits AOC"></div>
+            <div class="fgroup"><label>Qualitätsstufe</label><input type="text" id="fqs" placeholder="AOC, GCC…"></div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="fsect-title">Technische Daten</div>
+          <div class="fgrid">
+            <div class="fgroup"><label>Alkohol (%)</label><input type="number" id="fal" step="0.1" min="0" max="100" placeholder="13.5"></div>
+            <div class="fgroup"><label>Lagerort</label><input type="text" id="flo" placeholder="Keller Regal A"></div>
+            <div class="fgroup"><label>Trinkreif von</label><input type="number" id="ftrv" min="1900" max="2200" placeholder="2024"></div>
+            <div class="fgroup"><label>Trinkreif bis</label><input type="number" id="ftrb" min="1900" max="2200" placeholder="2030"></div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="fsect-title">Einkauf</div>
+          <div class="fgrid">
+            <div class="fgroup"><label>Einkaufspreis (CHF)</label><input type="number" id="fpr" step="0.05" min="0" placeholder="24.50"></div>
+            <div class="fgroup"><label>Einkaufsdatum</label><input type="date" id="fed"></div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="fsect-title">Bewertung & Notizen</div>
+          <div class="fgroup" style="margin-bottom:10px">
+            <label>Bewertung</label>
+            <div class="stars" id="form-stars">
+              <span class="star" onclick="setFStar(1)">☆</span><span class="star" onclick="setFStar(2)">☆</span>
+              <span class="star" onclick="setFStar(3)">☆</span><span class="star" onclick="setFStar(4)">☆</span>
+              <span class="star" onclick="setFStar(5)">☆</span>
+            </div>
+          </div>
+          <div class="fgroup"><label>Notizen</label><textarea id="fno" placeholder="Tasting Notes, Empfehlungen…"></textarea></div>
+        </div>
+
+        <div class="sig-preview" id="sig-prev">Signatur: …</div>
+        <button type="submit" class="btn btn-primary btn-full" id="submit-btn">Wein speichern</button>
+      </form>
+    </section>
+
+    <!-- DETAIL PAGE -->
+    <section id="page-detail" style="display:none">
+      <button class="back-btn" onclick="showPage('inventar')">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+        Inventar
+      </button>
+      <div class="detail-actions" id="detail-acts"></div>
+      <div id="detail-content"></div>
+    </section>
+
+  </main>
+</div>
+
+<!-- Toast & Delete Dialog -->
+<div id="toast"></div>
+<div id="del-dialog" class="dialog-back" style="display:none">
+  <div class="dialog">
+    <h2>Wein löschen?</h2>
+    <p id="del-txt">Dieser Wein wird dauerhaft entfernt.</p>
+    <div class="dialog-acts">
+      <button class="btn btn-outline" onclick="closeDel()">Abbrechen</button>
+      <button class="btn btn-danger" onclick="confirmDel()">Löschen</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ================================================================
+// COLUMN MAP — Reihenfolge muss mit dem Sheet übereinstimmen
+// ================================================================
+const COLS = ['rowKey','id','name','weingut','weintyp','traubensorten','jahrgang',
+  'trinkreifVon','trinkreifBis','land','region','appellation','qualitaetsstufe',
+  'alkohol','fuellmenge','lagerort','bestand','preis','einkaufsdatum',
+  'bewertung','notizen','weinSignatur','updatedAt'];
+
+// ================================================================
+// STATE
+// ================================================================
+let wines = [];
+let accessToken = null;
+let editingKey = null;
+let fStarVal = null;
+let photoData = {v:null, h:null};
+let delTarget = null;
+let currentView = 'grid';
+let isConnected = false;
+
+// ================================================================
+// CONFIG — aus localStorage lesen
+// ================================================================
+function getClientId() {
+  const saved = localStorage.getItem('wk-client-id');
+  return (saved && saved !== 'DEINE_CLIENT_ID_HIER.apps.googleusercontent.com') ? saved
+    : (CLIENT_ID !== 'DEINE_CLIENT_ID_HIER.apps.googleusercontent.com') ? CLIENT_ID
+    : null;
+}
+
+function saveConfig() {
+  const cid = document.getElementById('cfg-client-id').value.trim();
+  if (!cid) { toast('Client-ID darf nicht leer sein.', 'err'); return; }
+  localStorage.setItem('wk-client-id', cid);
+  toast('Gespeichert — verbinde…');
+  initGoogleAuth();
+}
+
+function toggleConfig() {
+  const p = document.getElementById('config-panel');
+  p.style.display = p.style.display === 'none' ? '' : 'none';
+  const cid = getClientId();
+  if (cid) document.getElementById('cfg-client-id').value = cid;
+}
+
+// ================================================================
+// GOOGLE IDENTITY SERVICES AUTH
+// ================================================================
+function initGoogleAuth() {
+  const cid = getClientId();
+  if (!cid) {
+    setStatus('err', '⚙️ Client-ID fehlt — bitte Einstellungen öffnen');
+    // Zeige trotzdem Offline-Daten wenn vorhanden
+    loadLocalFallback();
+    return;
+  }
+
+  // Lade GIS Script wenn nötig
+  if (!window.google?.accounts) {
+    const s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.onload = () => initTokenClient(cid);
+    s.onerror = () => {
+      setStatus('err', '⚠️ Google-Verbindung fehlgeschlagen (kein Internet?)');
+      loadLocalFallback();
+    };
+    document.head.appendChild(s);
+  } else {
+    initTokenClient(cid);
+  }
+}
+
+function initTokenClient(cid) {
+  const client = google.accounts.oauth2.initTokenClient({
+    client_id: cid,
+    scope: 'https://www.googleapis.com/auth/spreadsheets',
+    callback: (resp) => {
+      if (resp.error) {
+        setStatus('err', '❌ Anmeldung fehlgeschlagen: ' + resp.error);
+        loadLocalFallback();
+        return;
+      }
+      accessToken = resp.access_token;
+      isConnected = true;
+      setStatus('ok', '✅ Verbunden mit Google Sheets');
+      loadFromSheets();
+    },
+  });
+
+  setStatus('loading', 'Warte auf Google-Anmeldung…');
+  client.requestAccessToken({ prompt: '' });
+}
+
+// ================================================================
+// SHEETS API
+// ================================================================
+async function sheetsGet(range) {
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent(range)}`;
+  const r = await fetch(url, { headers: { Authorization: 'Bearer ' + accessToken } });
+  if (!r.ok) throw new Error('Sheets lesen: ' + r.status);
+  return r.json();
+}
+
+async function sheetsAppend(values) {
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent(SHEET_NAME)}!A1:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ values }),
+  });
+  if (!r.ok) throw new Error('Sheets append: ' + r.status);
+  return r.json();
+}
+
+async function sheetsUpdate(row, values) {
+  // row = 1-based sheet row number (2 = first data row)
+  const range = `${SHEET_NAME}!A${row}:W${row}`;
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent(range)}?valueInputOption=RAW`;
+  const r = await fetch(url, {
+    method: 'PUT',
+    headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ values }),
+  });
+  if (!r.ok) throw new Error('Sheets update: ' + r.status);
+  return r.json();
+}
+
+async function sheetsClear(row) {
+  const range = `${SHEET_NAME}!A${row}:W${row}`;
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent(range)}:clear`;
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + accessToken },
+  });
+  if (!r.ok) throw new Error('Sheets clear: ' + r.status);
+  return r.json();
+}
+
+// ================================================================
+// LOAD FROM SHEETS
+// ================================================================
+async function loadFromSheets() {
+  if (!accessToken) { loadLocalFallback(); return; }
+  setStatus('loading', 'Lade aus Google Sheets…');
+  try {
+    const data = await sheetsGet(`${SHEET_NAME}!A2:W1000`);
+    const rows = data.values || [];
+    wines = rows
+      .filter(r => r[0] && r[2]) // rowKey und name vorhanden
+      .map((r, idx) => rowToWein(r, idx + 2)); // +2 weil Zeile 1 = Header
+    saveLocal();
+    updateSyncTime();
+    setStatus('ok', `✅ ${wines.length} Weine geladen`);
+    document.getElementById('sheet-link-short').textContent = wines.length + ' Weine';
+    renderInventar();
+  } catch(e) {
+    setStatus('err', '❌ Ladefehler: ' + e.message);
+    loadLocalFallback();
+  }
+}
+
+function rowToWein(r, sheetRow) {
+  const get = i => (r[i] || '').trim();
+  return {
+    rowKey: parseInt(get(0)) || sheetRow,
+    sheetRow,
+    id: get(1), name: get(2), weingut: get(3), weintyp: get(4),
+    traubensorten: get(5), jahrgang: parseInt(get(6)) || 0,
+    trinkreifVon: get(7) ? parseInt(get(7)) : null,
+    trinkreifBis: get(8) ? parseInt(get(8)) : null,
+    land: get(9), region: get(10), appellation: get(11), qualitaetsstufe: get(12),
+    alkohol: get(13) ? parseFloat(get(13)) : null,
+    fuellmenge: get(14), lagerort: get(15),
+    bestand: parseInt(get(16)) || 0,
+    preis: get(17), einkaufsdatum: get(18),
+    bewertung: get(19) ? parseInt(get(19)) : null,
+    notizen: get(20), weinSignatur: get(21), updatedAt: get(22),
+    // Fotos kommen aus lokalem Cache (IndexedDB)
+    fotoVorne: null, fotoHinten: null,
+  };
+}
+
+function weinToRow(w, nextKey) {
+  const key = nextKey || w.rowKey;
+  const sig = buildSig(w.name, w.weingut, w.jahrgang, w.fuellmenge);
+  return [[
+    String(key), sig, w.name, w.weingut, w.weintyp,
+    w.traubensorten||'', String(w.jahrgang),
+    w.trinkreifVon ? String(w.trinkreifVon) : '',
+    w.trinkreifBis ? String(w.trinkreifBis) : '',
+    w.land||'', w.region||'', w.appellation||'', w.qualitaetsstufe||'',
+    w.alkohol!=null ? String(w.alkohol) : '',
+    w.fuellmenge, w.lagerort||'', String(w.bestand), w.preis||'',
+    w.einkaufsdatum||todayStr(),
+    w.bewertung ? String(w.bewertung) : '',
+    w.notizen||'', sig, new Date().toISOString(),
+  ]];
+}
+
+// ================================================================
+// LOCAL FALLBACK (IndexedDB für Fotos + Offline-Cache)
+// ================================================================
+let idb;
+async function openIDB() {
+  if (idb) return idb;
+  return new Promise((res,rej) => {
+    const req = indexedDB.open('WKCache',1);
+    req.onupgradeneeded = e => {
+      e.target.result.createObjectStore('cache',{keyPath:'k'});
+      e.target.result.createObjectStore('photos',{keyPath:'key'});
+    };
+    req.onsuccess = e => { idb = e.target.result; res(idb); };
+    req.onerror = () => rej(req.error);
+  });
+}
+
+async function saveLocal() {
+  const db = await openIDB();
+  const tx = db.transaction('cache','readwrite');
+  tx.objectStore('cache').put({k:'wines', data: wines.map(w=>({...w,fotoVorne:null,fotoHinten:null}))});
+}
+
+async function loadLocalFallback() {
+  try {
+    const db = await openIDB();
+    const tx = db.transaction('cache','readonly');
+    const req = tx.objectStore('cache').get('wines');
+    req.onsuccess = async () => {
+      if (req.result?.data) {
+        wines = req.result.data;
+        await loadLocalPhotos();
+        renderInventar();
+        if (!isConnected) setStatus('err', '⚠️ Offline — lokaler Cache vom ' + (new Date().toLocaleDateString('de-CH')));
+      } else {
+        renderInventar();
+      }
+    };
+  } catch(e) { renderInventar(); }
+}
+
+async function savePhoto(key, side, data) {
+  const db = await openIDB();
+  const tx = db.transaction('photos','readwrite');
+  tx.objectStore('photos').put({key: `${key}_${side}`, data});
+}
+
+async function loadLocalPhotos() {
+  const db = await openIDB();
+  for (const w of wines) {
+    await new Promise(res => {
+      const tx = db.transaction('photos','readonly');
+      const sv = tx.objectStore('photos').get(`${w.rowKey}_v`);
+      sv.onsuccess = () => { if (sv.result) w.fotoVorne = sv.result.data; };
+      const sh = tx.objectStore('photos').get(`${w.rowKey}_h`);
+      sh.onsuccess = () => { if (sh.result) w.fotoHinten = sh.result.data; res(); };
+    });
+  }
+}
+
+function updateSyncTime() {
+  document.getElementById('last-sync').textContent = new Date().toLocaleTimeString('de-CH',{hour:'2-digit',minute:'2-digit'});
+}
+
+// ================================================================
+// NAVIGATION
+// ================================================================
+function showPage(p, key) {
+  ['inventar','form','detail'].forEach(n => {
+    document.getElementById('page-'+n).style.display = n===p ? '' : 'none';
+  });
+  ['nav-inv','nav-neu','nav-cfg'].forEach(id => document.getElementById(id)?.classList.remove('active'));
+  if (p==='inventar') { document.getElementById('nav-inv').classList.add('active'); renderInventar(); }
+  else if (p==='form') { document.getElementById('nav-neu').classList.add('active'); if (!key) openNewForm(); }
+  else if (p==='detail' && key!=null) { document.getElementById('nav-inv').classList.add('active'); renderDetail(key); }
+}
+
+// ================================================================
+// INVENTAR RENDER
+// ================================================================
+function getFiltered() {
+  const q = (document.getElementById('s-input')?.value||'').toLowerCase();
+  const typ = document.getElementById('f-typ')?.value||'';
+  return wines.filter(w => {
+    const mq = !q||[w.name,w.weingut,w.region,w.appellation,w.land].some(f=>f&&f.toLowerCase().includes(q));
+    const mt = !typ||w.weintyp===typ;
+    return mq&&mt;
+  });
+}
+
+function renderInventar() {
+  const f = getFiltered();
+  const tot = f.reduce((s,w)=>s+(w.bestand||0),0);
+  document.getElementById('stats-line').textContent = `${f.length} ${f.length===1?'Wein':'Weine'} · ${tot} Flaschen total`;
+  const c = document.getElementById('wine-container');
+  if (!f.length) {
+    c.innerHTML = `<div class="empty"><svg width="55" height="55" fill="none" stroke="currentColor" stroke-width="1.2" viewBox="0 0 24 24"><path d="M8 3h8l-1.5 5a5 5 0 01-5 0L8 3z"/><rect x="11" y="11" width="2" height="5"/><rect x="8" y="16" width="8" height="1.5" rx=".75"/></svg><p>Keine Weine gefunden.</p><button class="btn btn-primary btn-sm" onclick="showPage('form')">Ersten Wein erfassen</button></div>`;
+    return;
+  }
+  c.innerHTML = currentView==='grid'
+    ? `<div class="wine-grid">${f.map(cardHTML).join('')}</div>`
+    : `<div class="wine-list">${f.map(rowHTML).join('')}</div>`;
+}
+
+function cardHTML(w) {
+  const e = w.bestand===0;
+  return `<div class="wine-card" onclick="showPage('detail',${w.rowKey})">
+    <div class="wine-card-photo">
+      ${w.fotoVorne?`<img src="${w.fotoVorne}" alt="">`:`<svg class="no-photo" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.2" viewBox="0 0 24 24"><path d="M8 3h8l-1.5 5a5 5 0 01-5 0L8 3z"/><rect x="11" y="11" width="2" height="5"/><rect x="8" y="16" width="8" height="1.5" rx=".75"/></svg>`}
+      <div class="card-badges"><span class="badge badge-${w.weintyp.toLowerCase()}">${w.weintyp}</span></div>
+      <div class="card-bestand ${e?'empty':''}">${e?'Leer':w.bestand+'×'}</div>
+    </div>
+    <div class="wine-card-body">
+      <div class="wine-card-name">${esc(w.name)}</div>
+      <div class="wine-card-sub">${w.jahrgang} · ${esc(w.weingut)}</div>
+      ${w.appellation?`<div class="wine-card-sub" style="font-size:.71rem;opacity:.65">${esc(w.appellation)}</div>`:''}
+      ${w.bewertung?starsHTML(w.bewertung):''}
+      <div class="wine-card-ctrls" onclick="event.stopPropagation()">
+        <button class="btn-icon" onclick="changeBestand(${w.rowKey},-1)" ${w.bestand<=0?'disabled':''}>
+          <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
+        <span>${w.bestand}</span>
+        <button class="btn-icon" onclick="changeBestand(${w.rowKey},1)">
+          <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function rowHTML(w) {
+  return `<div class="wine-row" onclick="showPage('detail',${w.rowKey})">
+    <div class="wine-row-thumb">${w.fotoVorne?`<img src="${w.fotoVorne}" alt="">`:''}</div>
+    <div class="wine-row-info">
+      <div class="wine-row-name">${esc(w.name)} <span class="badge badge-${w.weintyp.toLowerCase()}">${w.weintyp}</span></div>
+      <div class="wine-row-sub">${w.jahrgang} · ${esc(w.weingut)}${w.appellation?' · '+esc(w.appellation):''}</div>
+      ${w.bewertung?starsHTML(w.bewertung):''}
+    </div>
+    <div class="wine-row-ctrls" onclick="event.stopPropagation()">
+      <button class="btn-icon" onclick="changeBestand(${w.rowKey},-1)" ${w.bestand<=0?'disabled':''}>
+        <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>
+      <span ${w.bestand===0?'style="color:var(--danger)"':''}>${w.bestand}</span>
+      <button class="btn-icon" onclick="changeBestand(${w.rowKey},1)">
+        <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>
+    </div>
+  </div>`;
+}
+
+// ================================================================
+// DETAIL
+// ================================================================
+function renderDetail(key) {
+  const w = wines.find(x=>x.rowKey===key);
+  if (!w) { showPage('inventar'); return; }
+  document.getElementById('detail-acts').innerHTML = `
+    <button class="btn btn-outline btn-sm" onclick="openEditForm(${key})">✏️ Bearbeiten</button>
+    <button class="btn btn-outline btn-sm" style="color:var(--danger);border-color:color-mix(in srgb,var(--danger) 40%,transparent)" onclick="openDel(${key})">🗑 Löschen</button>`;
+  document.getElementById('detail-content').innerHTML = `
+    <div class="detail-hero">
+      <div class="detail-photos">
+        <div class="detail-photo">${w.fotoVorne?`<img src="${w.fotoVorne}" alt="">`:`<svg class="no-photo" width="38" height="38" fill="none" stroke="currentColor" stroke-width="1.2" viewBox="0 0 24 24"><path d="M8 3h8l-1.5 5a5 5 0 01-5 0L8 3z"/><rect x="11" y="11" width="2" height="5"/><rect x="8" y="16" width="8" height="1.5" rx=".75"/></svg>`}</div>
+        ${w.fotoHinten?`<div class="detail-photo"><img src="${w.fotoHinten}" alt=""></div>`:''}
+      </div>
+      <div class="detail-info">
+        <div><span class="badge badge-${w.weintyp.toLowerCase()}">${w.weintyp}</span></div>
+        <div><div class="detail-name">${esc(w.name)}</div><div class="detail-weingut">${esc(w.weingut)}</div></div>
+        <div class="detail-year">${w.jahrgang}</div>
+        <div>
+          <label style="margin-bottom:5px">Bestand</label>
+          <div class="bestand-row">
+            <button class="btn-icon" onclick="changeBestand(${key},-1,true)" ${w.bestand<=0?'disabled':''}>
+              <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </button>
+            <span class="bestand-num ${w.bestand===0?'empty':''}">${w.bestand}</span>
+            <button class="btn-icon" onclick="changeBestand(${key},1,true)">
+              <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </button>
+          </div>
+        </div>
+        <div>
+          <label style="margin-bottom:5px">Bewertung</label>
+          <div class="stars" id="dstars">${[1,2,3,4,5].map(i=>`<span class="star ${w.bewertung&&i<=w.bewertung?'filled':''}" onclick="setDetailStar(${key},${i})" style="font-size:1.15rem">${w.bewertung&&i<=w.bewertung?'★':'☆'}</span>`).join('')}</div>
+        </div>
+      </div>
+    </div>
+    <div class="detail-card">
+      <h2>Details</h2>
+      <div class="dfields">
+        ${df('Appellation',w.appellation)}${df('Region',w.region)}${df('Land',w.land)}${df('Qualitätsstufe',w.qualitaetsstufe)}
+        ${df('Traubensorten',w.traubensorten)}${df('Alkohol',w.alkohol?w.alkohol+'%':'')}
+        ${df('Füllmenge',w.fuellmenge)}${df('Lagerort',w.lagerort)}
+        ${df('Trinkreif von',w.trinkreifVon)}${df('Trinkreif bis',w.trinkreifBis)}
+        ${df('Einkaufspreis',w.preis?'CHF '+parseFloat(w.preis).toFixed(2):'')}${df('Einkaufsdatum',w.einkaufsdatum)}
+      </div>
+    </div>
+    ${w.notizen?`<div class="detail-card"><h2>Notizen</h2><p style="font-size:.9rem;white-space:pre-wrap">${esc(w.notizen)}</p></div>`:''}
+    <div style="font-size:.7rem;font-family:monospace;color:var(--muted);opacity:.45;word-break:break-all">ID: ${esc(w.weinSignatur)}</div>`;
+}
+
+function df(label, val) {
+  if (!val && val!==0) return '';
+  return `<dl class="dfield"><dt>${label}</dt><dd>${esc(String(val))}</dd></dl>`;
+}
+
+// ================================================================
+// BESTAND
+// ================================================================
+async function changeBestand(key, delta, rerender) {
+  const w = wines.find(x=>x.rowKey===key);
+  if (!w) return;
+  const nv = Math.max(0, w.bestand+delta);
+  if (nv===w.bestand) return;
+  w.bestand = nv;
+  w.updatedAt = new Date().toISOString();
+  if (isConnected) {
+    try { await sheetsUpdate(w.sheetRow, weinToRow(w)); updateSyncTime(); }
+    catch(e) { toast('Sync-Fehler: '+e.message,'err'); }
+  }
+  saveLocal();
+  if (rerender) renderDetail(key); else renderInventar();
+}
+
+async function setDetailStar(key, val) {
+  const w = wines.find(x=>x.rowKey===key);
+  if (!w) return;
+  w.bewertung = val;
+  if (isConnected) {
+    try { await sheetsUpdate(w.sheetRow, weinToRow(w)); updateSyncTime(); }
+    catch(e) { toast('Sync-Fehler: '+e.message,'err'); }
+  }
+  saveLocal();
+  renderDetail(key);
+  toast('Bewertung gespeichert');
+}
+
+// ================================================================
+// FORM
+// ================================================================
+function openNewForm() {
+  editingKey=null; fStarVal=null; photoData={v:null,h:null};
+  document.getElementById('form-title').textContent='Neuer Wein';
+  document.getElementById('form-sub').textContent='Wein zum Inventar hinzufügen';
+  document.getElementById('submit-btn').textContent='Wein speichern';
+  document.getElementById('wein-form').reset();
+  document.getElementById('fed').value=todayStr();
+  document.getElementById('fbs').value='1';
+  setFStar(0); resetPhoto('v'); resetPhoto('h'); updSig();
+}
+
+function openEditForm(key) {
+  const w=wines.find(x=>x.rowKey===key); if(!w) return;
+  editingKey=key; fStarVal=w.bewertung||null; photoData={v:w.fotoVorne||null, h:w.fotoHinten||null};
+  document.getElementById('form-title').textContent='Bearbeiten';
+  document.getElementById('form-sub').textContent=w.name;
+  document.getElementById('submit-btn').textContent='Änderungen speichern';
+  const sf=(id,v)=>{const el=document.getElementById(id);if(el)el.value=v??'';};
+  sf('fn',w.name);sf('fwg',w.weingut);sf('fwt',w.weintyp);sf('fjg',w.jahrgang);sf('ffm',w.fuellmenge);
+  sf('fbs',w.bestand);sf('ftr',w.traubensorten);sf('fla',w.land);sf('frg',w.region);
+  sf('fap',w.appellation);sf('fqs',w.qualitaetsstufe);sf('fal',w.alkohol);sf('flo',w.lagerort);
+  sf('ftrv',w.trinkreifVon);sf('ftrb',w.trinkreifBis);sf('fpr',w.preis);sf('fed',w.einkaufsdatum||todayStr());sf('fno',w.notizen);
+  setFStar(fStarVal||0); setPhotoPreview('v',photoData.v); setPhotoPreview('h',photoData.h); updSig();
+  document.getElementById('page-inventar').style.display='none';
+  document.getElementById('page-detail').style.display='none';
+  document.getElementById('page-form').style.display='';
+}
+
+async function submitForm(e) {
+  e.preventDefault();
+  const name=gv('fn'),weingut=gv('fwg'),weintyp=gv('fwt'),jahrgang=parseInt(gv('fjg')),fuellmenge=gv('ffm'),bestand=parseInt(gv('fbs'));
+  if (!name||!weingut||!weintyp||!jahrgang||!fuellmenge) { toast('Pflichtfelder ausfüllen.','err'); return; }
+  const sig=buildSig(name,weingut,jahrgang,fuellmenge);
+  const dup=wines.find(w=>w.weinSignatur===sig&&w.rowKey!==editingKey);
+  if (dup) { toast('Dieser Wein ist bereits erfasst.','err'); return; }
+
+  const nextKey = editingKey || (Math.max(0,...wines.map(w=>w.rowKey||0))+1);
+  const wein = {
+    rowKey:nextKey, id:sig, name, weingut, weintyp,
+    traubensorten:gv('ftr')||null, jahrgang,
+    trinkreifVon:gv('ftrv')?parseInt(gv('ftrv')):null,
+    trinkreifBis:gv('ftrb')?parseInt(gv('ftrb')):null,
+    land:gv('fla')||null, region:gv('frg')||null, appellation:gv('fap')||null,
+    qualitaetsstufe:gv('fqs')||null, alkohol:gv('fal')?parseFloat(gv('fal')):null,
+    fuellmenge, lagerort:gv('flo')||null, bestand,
+    preis:gv('fpr')||null, einkaufsdatum:gv('fed')||todayStr(),
+    bewertung:fStarVal, notizen:gv('fno')||null,
+    fotoVorne:photoData.v, fotoHinten:photoData.h,
+    weinSignatur:sig, updatedAt:new Date().toISOString(),
+  };
+
+  document.getElementById('submit-btn').textContent='Speichern…';
+  document.getElementById('submit-btn').disabled=true;
+
+  try {
+    if (isConnected) {
+      if (editingKey!=null) {
+        const existing=wines.find(w=>w.rowKey===editingKey);
+        wein.sheetRow=existing.sheetRow;
+        await sheetsUpdate(wein.sheetRow, weinToRow(wein));
+        const idx=wines.findIndex(w=>w.rowKey===editingKey);
+        if (idx!==-1) wines[idx]={...wein};
+      } else {
+        const res=await sheetsAppend(weinToRow(wein));
+        // Bestimme sheetRow aus der Antwort
+        const updRange=res.updates?.updatedRange||'';
+        const rowMatch=updRange.match(/(\d+)$/);
+        wein.sheetRow=rowMatch?parseInt(rowMatch[1]):wines.length+2;
+        wines.push(wein);
+      }
+      updateSyncTime();
+    } else {
+      wein.sheetRow=wines.length+2;
+      if (editingKey!=null) {
+        const idx=wines.findIndex(w=>w.rowKey===editingKey);
+        if (idx!==-1) wines[idx]={...wein};
+      } else wines.push(wein);
+    }
+
+    // Fotos lokal speichern
+    if (photoData.v) savePhoto(nextKey,'v',photoData.v);
+    if (photoData.h) savePhoto(nextKey,'h',photoData.h);
+    saveLocal();
+    toast(editingKey?'Änderungen gespeichert':'Wein erfasst: '+name);
+    showPage('detail', nextKey);
+    editingKey=null;
+  } catch(err) {
+    toast('Fehler: '+err.message,'err');
+  } finally {
+    document.getElementById('submit-btn').textContent = editingKey?'Änderungen speichern':'Wein speichern';
+    document.getElementById('submit-btn').disabled=false;
+  }
+}
+
+// DELETE
+function openDel(key) { delTarget=key; const w=wines.find(x=>x.rowKey===key); document.getElementById('del-txt').textContent=`«${w?.name}» wird dauerhaft entfernt.`; document.getElementById('del-dialog').style.display=''; }
+function closeDel() { document.getElementById('del-dialog').style.display='none'; delTarget=null; }
+async function confirmDel() {
+  if (delTarget==null) return;
+  const w=wines.find(x=>x.rowKey===delTarget);
+  if (w && isConnected) {
+    try { await sheetsClear(w.sheetRow); } catch(e) { toast('Lösch-Fehler: '+e.message,'err'); }
+  }
+  wines=wines.filter(x=>x.rowKey!==delTarget);
+  saveLocal(); closeDel(); toast('Wein gelöscht.'); showPage('inventar');
+}
+
+// ================================================================
+// STARS
+// ================================================================
+function setFStar(v) {
+  fStarVal=v>0?v:null;
+  document.querySelectorAll('#form-stars .star').forEach((s,i)=>{
+    s.classList.toggle('filled',i<v); s.textContent=i<v?'★':'☆';
+  });
+}
+function starsHTML(v) {
+  return `<div class="stars ro" style="font-size:.82rem">${[1,2,3,4,5].map(i=>`<span class="star ${i<=v?'filled':''}">${i<=v?'★':'☆'}</span>`).join('')}</div>`;
+}
+
+// ================================================================
+// PHOTOS
+// ================================================================
+function handlePhoto(side,input) {
+  const file=input.files[0]; if(!file) return;
+  const reader=new FileReader();
+  reader.onload=e=>{ photoData[side]=e.target.result; setPhotoPreview(side,photoData[side]); document.getElementById('ocr-'+side+'-btn').style.display=''; };
+  reader.readAsDataURL(file);
+}
+function setPhotoPreview(side,src) {
+  const drop=document.getElementById('drop-'+side);
+  drop.querySelectorAll('img.prev').forEach(i=>i.remove());
+  if (src) { const img=document.createElement('img'); img.src=src; img.className='prev'; drop.insertBefore(img,drop.firstChild); document.getElementById('ocr-'+side+'-btn').style.display=''; }
+}
+function rmPhoto(side,e) { e.stopPropagation(); photoData[side]=null; document.getElementById('drop-'+side).querySelectorAll('img.prev').forEach(i=>i.remove()); document.getElementById('ocr-'+side+'-btn').style.display='none'; document.getElementById('ocr-'+side+'-out').style.display='none'; document.getElementById('f'+side).value=''; }
+function resetPhoto(side) { photoData[side]=null; document.getElementById('drop-'+side).querySelectorAll('img.prev').forEach(i=>i.remove()); document.getElementById('ocr-'+side+'-btn').style.display='none'; document.getElementById('ocr-'+side+'-out').style.display='none'; const fi=document.getElementById('f'+side); if(fi) fi.value=''; }
+
+// ================================================================
+// OCR
+// ================================================================
+async function doOCR(side) {
+  const src=photoData[side]; if(!src) { toast('Kein Foto.','err'); return; }
+  const btn=document.getElementById('ocr-'+side+'-btn');
+  const out=document.getElementById('ocr-'+side+'-out');
+  btn.disabled=true; btn.textContent='⏳ Läuft…';
+  try {
+    if (typeof Tesseract==='undefined') await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
+    const {data:{text}}=await Tesseract.recognize(src,'deu+eng',{logger:()=>{}});
+    out.textContent=text; out.style.display='';
+    const ym=text.match(/\b(19|20)\d{2}\b/); if(ym){document.getElementById('fjg').value=ym[0];updSig();}
+    const am=text.match(/(\d{1,2}[.,]\d)\s*%\s*[Vv]ol/); if(am) document.getElementById('fal').value=am[1].replace(',','.');
+    const cm=text.match(/(\d+)\s*cl/i); const mm=text.match(/(\d+)\s*ml/i);
+    if(cm){document.getElementById('ffm').value=cm[1]+' cl';updSig();}else if(mm){document.getElementById('ffm').value=Math.round(parseInt(mm[1])/10)+' cl';updSig();}
+    toast('OCR fertig — bitte Felder prüfen.');
+  } catch(err) { out.textContent='Fehler: '+err.message; out.style.display=''; toast('OCR fehlgeschlagen.','err'); }
+  finally { btn.disabled=false; btn.textContent=side==='v'?'🔍 OCR Vorne':'🔍 OCR Hinten'; }
+}
+function loadScript(src) { return new Promise((res,rej)=>{ const s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=rej; document.head.appendChild(s); }); }
+
+// ================================================================
+// UTILS
+// ================================================================
+function gv(id){return(document.getElementById(id)?.value||'').trim();}
+function esc(s){if(!s)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function todayStr(){return new Date().toISOString().split('T')[0];}
+function buildSig(n,wg,jg,fm){return`${(n||'').trim()}-${(wg||'').trim()}-${jg||''}-${(fm||'').trim()}`;}
+function updSig(){document.getElementById('sig-prev').textContent='Signatur: '+buildSig(gv('fn'),gv('fwg'),gv('fjg'),gv('ffm'));}
+function setView(v){currentView=v;document.getElementById('vg-btn').classList.toggle('active',v==='grid');document.getElementById('vl-btn').classList.toggle('active',v==='list');renderInventar();}
+function setStatus(type,msg){const dot=document.getElementById('status-dot');const txt=document.getElementById('status-text');txt.textContent=msg;dot.className='dot-'+type;}
+function toast(msg,type){const el=document.getElementById('toast');el.textContent=msg;el.className='show'+(type==='err'?' err':'');clearTimeout(window._tt);window._tt=setTimeout(()=>{el.className='';},3200);}
+function toggleTheme(){const d=document.documentElement.classList.toggle('dark');document.getElementById('theme-icon').textContent=d?'☀️':'🌙';document.getElementById('theme-lbl').textContent=d?'Hellmodus':'Dunkelmodus';try{localStorage.setItem('wk-theme',d?'dark':'light');}catch(e){}}
+
+function exportSnapshot() {
+  const now=new Date();const pad=n=>String(n).padStart(2,'0');
+  const ts=`${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+  const html=`<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>WeinInventar Snapshot ${ts}</title><style>body{font-family:system-ui,sans-serif;max-width:1000px;margin:2rem auto;padding:0 1rem}h1{color:#6b1a2e}.meta{color:#7a6670;font-size:.9rem;margin-bottom:1.5rem}table{width:100%;border-collapse:collapse;font-size:.85rem}th{background:#6b1a2e;color:#fff;padding:.55rem .75rem;text-align:left}td{padding:.45rem .75rem;border-bottom:1px solid #e2d9d0}tr:nth-child(even)td{background:#faf7f4}.badge{display:inline-block;padding:1px 8px;border-radius:20px;font-size:.71rem;font-weight:700;border:1px solid}.weiss{background:#fefce8;color:#854d0e;border-color:#854d0e}.rot{background:#fde8e8;color:#991b1b;border-color:#991b1b}.rosé,.rose{background:#fce7f3;color:#9d174d;border-color:#9d174d}.orange{background:#fff7ed;color:#c2410c;border-color:#c2410c}.sekt{background:#eff6ff;color:#1d4ed8;border-color:#1d4ed8}.stars{color:#c8860a}</style></head><body><h1>🍷 WeinInventar Snapshot</h1><p class="meta">Exportiert am ${now.toLocaleString('de-CH')} · ${wines.length} Weine · Quelle: Google Sheets</p><table><thead><tr><th>Name</th><th>Weingut</th><th>Typ</th><th>Jahrgang</th><th>Appellation</th><th>Alkohol</th><th>Bestand</th><th>Bewertung</th></tr></thead><tbody>${wines.map(w=>`<tr><td><strong>${esc(w.name)}</strong></td><td>${esc(w.weingut)}</td><td><span class="badge ${w.weintyp.toLowerCase()}">${w.weintyp}</span></td><td>${w.jahrgang}</td><td>${w.appellation||'–'}</td><td>${w.alkohol?w.alkohol+'%':'–'}</td><td>${w.bestand}</td><td class="stars">${w.bewertung?'★'.repeat(w.bewertung):'–'}</td></tr>`).join('')}</tbody></table></body></html>`;
+  const blob=new Blob([html],{type:'text/html;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`weininventar_${ts}.html`;a.click();URL.revokeObjectURL(url);
+  toast('Snapshot heruntergeladen.');
+}
+
+// ================================================================
+// INIT
+// ================================================================
+(function(){
+  // Theme
+  let dark=window.matchMedia('(prefers-color-scheme: dark)').matches;
+  try{const s=localStorage.getItem('wk-theme');if(s)dark=s==='dark';}catch(e){}
+  if(dark)document.documentElement.classList.add('dark');
+  document.getElementById('theme-icon').textContent=dark?'☀️':'🌙';
+  document.getElementById('theme-lbl').textContent=dark?'Hellmodus':'Dunkelmodus';
+  // Config-Feld vorausfüllen
+  const cid=getClientId();
+  if(cid)document.getElementById('cfg-client-id').value=cid;
+  // Auth starten
+  initGoogleAuth();
+})();
+</script>
+</body>
+</html>
