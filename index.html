@@ -391,10 +391,10 @@ const SHEET_NAME = 'Tabellenblatt1';
           <option>Weiss</option><option>Rot</option><option>Rosé</option><option>Orange</option><option>Sekt</option>
         </select>
         <div class="view-toggle">
-          <button id="vg-btn" class="active" onclick="setView('grid')" title="Raster">
+          <button id="vg-btn" onclick="setView('grid')" title="Raster">
             <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
           </button>
-          <button id="vl-btn" onclick="setView('list')" title="Liste">
+          <button id="vl-btn" class="active" onclick="setView('list')" title="Liste">
             <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
           </button>
         </div>
@@ -439,7 +439,7 @@ const SHEET_NAME = 'Tabellenblatt1';
               <div id="ocr-h-out" class="ocr-out" style="display:none"></div>
             </div>
           </div>
-          <p style="font-size:.75rem;color:var(--muted);margin-top:8px">⚠️ Fotos werden lokal im Browser gespeichert, nicht in Google Sheets (zu gross für Sheets).</p>
+          <p style="font-size:.75rem;color:#16a34a;margin-top:8px">✅ Fotos werden in Google Drive gespeichert (beim OCR-Klick) und lokal gecacht.</p>
         </div>
 
         <div class="form-section">
@@ -537,19 +537,25 @@ const SHEET_NAME = 'Tabellenblatt1';
         </div>
       </div>
 
-      <!-- Filter -->
+      <!-- Filter + Sortierung -->
       <div class="filters" style="margin-bottom:14px">
-        <input type="search" id="fav-search" placeholder="🔍 Name suchen…" oninput="renderFavoriten()" style="max-width:220px">
-        <select id="fav-filter-status" onchange="renderFavoriten()" style="max-width:150px;width:auto">
+        <input type="search" id="fav-search" placeholder="🔍 Name suchen…" oninput="renderFavoriten()" style="max-width:200px">
+        <select id="fav-filter-status" onchange="renderFavoriten()" style="max-width:140px;width:auto">
           <option value="">Alle Status</option>
           <option>Favorit</option>
           <option>Wunschliste</option>
           <option>Beobachten</option>
           <option>Bereits im Keller</option>
         </select>
-        <select id="fav-filter-typ" onchange="renderFavoriten()" style="max-width:130px;width:auto">
+        <select id="fav-filter-typ" onchange="renderFavoriten()" style="max-width:120px;width:auto">
           <option value="">Alle Typen</option>
           <option>Weiss</option><option>Rot</option><option>Rosé</option><option>Orange</option><option>Sekt</option>
+        </select>
+        <select id="fav-sort" onchange="renderFavoriten()" style="max-width:160px;width:auto">
+          <option value="bewertung">Sortierung: Bewertung ★</option>
+          <option value="name">Sortierung: Name A–Z</option>
+          <option value="jahrgang">Sortierung: Jahrgang</option>
+          <option value="preis">Sortierung: Preis</option>
         </select>
       </div>
 
@@ -680,7 +686,7 @@ let editingKey = null;
 let fStarVal = null;
 let photoData = {v:null, h:null};
 let delTarget = null;
-let currentView = 'grid';
+let currentView = 'list'; // Standard: Listenansicht
 let isConnected = false;
 
 // ================================================================
@@ -1190,6 +1196,8 @@ async function loadFromSheets() {
     wines = rows
       .filter(r => r[0] && r[2]) // rowKey und name vorhanden
       .map((r, idx) => rowToWein(r, idx + 2)); // +2 weil Zeile 1 = Header
+    // Fotos aus lokalem IndexedDB-Cache laden (base64, gerätelokal)
+    await loadLocalPhotos();
     saveLocal();
     updateSyncTime();
     setStatus('ok', `✅ ${wines.length} Weine geladen`);
@@ -1397,7 +1405,7 @@ function cardHTML(w) {
 
 function rowHTML(w) {
   return `<div class="wine-row" onclick="showPage('detail',${w.rowKey})">
-    <div class="wine-row-thumb">${w.fotoVorne?`<img src="${w.fotoVorne}" alt="">`:''}</div>
+    <div class="wine-row-thumb">${(w.fotoVorne||w.fotoVorneUrl)?`<img src="${w.fotoVorne||w.fotoVorneUrl}" alt="" onerror="this.style.display='none'">`:`<svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" style="opacity:.2"><path d="M8 3h8l-1.5 5a5 5 0 01-5 0L8 3z"/><rect x="11" y="11" width="2" height="5"/><rect x="8" y="16" width="8" height="1.5" rx=".75"/></svg>`}</div>
     <div class="wine-row-info">
       <div class="wine-row-name">${esc(w.name)} <span class="badge badge-${w.weintyp.toLowerCase()}">${w.weintyp}</span></div>
       <div class="wine-row-sub">${w.jahrgang} · ${esc(w.weingut)}${w.appellation?' · '+esc(w.appellation):''}</div>
@@ -2251,11 +2259,29 @@ function renderFavoriten() {
   const q = (document.getElementById('fav-search')?.value||'').toLowerCase();
   const st = document.getElementById('fav-filter-status')?.value||'';
   const typ = document.getElementById('fav-filter-typ')?.value||'';
-  const filtered = favoriten.filter(f => {
+  const sort = document.getElementById('fav-sort')?.value||'bewertung';
+
+  let filtered = favoriten.filter(f => {
     const mq = !q || f.name.toLowerCase().includes(q);
     const ms = !st || f.status === st;
     const mt = !typ || f.weintyp === typ;
     return mq && ms && mt;
+  });
+
+  // Sortierung
+  filtered.sort((a, b) => {
+    if (sort === 'bewertung') {
+      const ba = parseFloat(a.meineBewertung)||0;
+      const bb = parseFloat(b.meineBewertung)||0;
+      return bb - ba; // absteigend
+    } else if (sort === 'name') {
+      return a.name.localeCompare(b.name, 'de');
+    } else if (sort === 'jahrgang') {
+      return (parseInt(b.jahrgang)||0) - (parseInt(a.jahrgang)||0);
+    } else if (sort === 'preis') {
+      return (parseFloat(b.preis)||0) - (parseFloat(a.preis)||0);
+    }
+    return 0;
   });
 
   const inKeller = favoriten.filter(f => f.inKeller === 'Ja').length;
@@ -2277,22 +2303,27 @@ function renderFavoriten() {
   c.innerHTML = '<div class="wine-list">' + filtered.map(f => {
     const sc = statusColor[f.status] || 'var(--muted)';
     const si = statusIcon[f.status] || '●';
-    const bewStr = f.meineBewertung ? `★ ${parseFloat(f.meineBewertung).toFixed(1)}` : '';
-    const vivinoStr = f.vivinoScore ? `Vivino: ${f.vivinoScore}` : '';
+    const bew = f.meineBewertung ? parseFloat(f.meineBewertung) : null;
+    const bewStars = bew ? '★'.repeat(Math.round(bew)) + '☆'.repeat(5-Math.round(bew)) : '';
+    const vivinoStr = f.vivinoScore ? `Vivino ${f.vivinoScore}` : '';
     const preisStr = f.preis ? `CHF ${parseFloat(f.preis).toFixed(2)}` : '';
-    return `<div class="wine-row" style="cursor:default">
-      <div style="width:36px;height:36px;flex-shrink:0;border-radius:50%;background:${sc}22;display:flex;align-items:center;justify-content:center;font-size:1rem;border:1.5px solid ${sc}">${si}</div>
+    return `<div class="wine-row" style="cursor:default;align-items:flex-start;padding:10px 12px">
+      <div style="width:38px;height:38px;flex-shrink:0;border-radius:50%;background:${sc}22;display:flex;align-items:center;justify-content:center;font-size:1rem;border:1.5px solid ${sc};margin-top:2px">${si}</div>
       <div class="wine-row-info">
         <div class="wine-row-name">
           ${esc(f.name)}
           <span class="badge badge-${f.weintyp.toLowerCase()}" style="vertical-align:middle">${f.weintyp}</span>
-          ${f.inKeller==='Ja'?'<span style="font-size:.7rem;color:#16a34a;margin-left:4px">Im Keller</span>':''}
         </div>
-        <div class="wine-row-sub">${f.jahrgang||''}${f.jahrgang&&(bewStr||vivinoStr||preisStr)?' · ':''}${bewStr}${bewStr&&vivinoStr?' · ':''}${vivinoStr}${preisStr?' · '+preisStr:''}</div>
+        <div class="wine-row-sub">${f.jahrgang ? f.jahrgang+' · ':''}${vivinoStr ? vivinoStr+' · ':''}${preisStr||''}</div>
+        ${bew ? `<div style="margin-top:3px;display:flex;align-items:center;gap:5px">
+          <span style="color:var(--accent);font-size:1rem;letter-spacing:1px">${bewStars}</span>
+          <span style="font-size:.78rem;font-weight:700;color:var(--accent)">${bew.toFixed(1)}</span>
+        </div>` : '<div style="margin-top:3px;font-size:.75rem;color:var(--muted)">Noch nicht bewertet</div>'}
         ${f.notiz?`<div style="font-size:.75rem;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:400px">${esc(f.notiz)}</div>`:''}
         <div style="margin-top:4px;display:flex;gap:5px;align-items:center;flex-wrap:wrap">
           <span style="font-size:.7rem;font-weight:700;color:${sc};border:1px solid ${sc};border-radius:4px;padding:1px 6px">${esc(f.status)}</span>
-          ${f.vivinoUrl?`<a href="${esc(f.vivinoUrl)}" target="_blank" style="font-size:.72rem;color:var(--primary);text-decoration:none;border-bottom:1px solid var(--primary)/30">🍷 Vivino</a>`:''}
+          ${f.inKeller==='Ja'?'<span style="font-size:.7rem;color:#16a34a;font-weight:700">✔ Im Keller</span>':''}
+          ${f.vivinoUrl?`<a href="${esc(f.vivinoUrl)}" target="_blank" style="font-size:.72rem;color:var(--primary);text-decoration:none">🍷 Vivino</a>`:''}
         </div>
       </div>
       <div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0;align-items:flex-end">
