@@ -515,14 +515,18 @@ const SHEET_NAME = 'Tabellenblatt1';
         </select>
       </div>
 
-      <!-- Vivino Widget -->
-      <div style="margin-bottom:18px">
+      <!-- Vivino Widget (extended mit letzter Bewertung) -->
+      <div style="margin-bottom:18px;border:1.5px solid var(--border);border-radius:var(--radius);padding:12px;background:var(--surface)">
         <div class="vivino-widget user-profile-widget"
           data-vivino-widget-type="user"
           data-vivino-user-id="marc_eber"
-          data-vivino-widget-layout="compact">
+          data-vivino-widget-layout="extended"
+          data-vivino-widget-include-review="true">
+          <!-- Fallback-Link falls Widget nicht lädt -->
           <a href="https://www.vivino.com/de/users/marc_eber/latest" target="_blank" rel="nofollow"
-            style="font-size:.8rem;color:var(--muted);text-decoration:none">marc_eber auf Vivino ↗</a>
+            style="font-size:.85rem;color:var(--primary);font-weight:600;text-decoration:none">
+            🍷 marc_eber auf Vivino — aktuelle Bewertungen ansehen ↗
+          </a>
         </div>
       </div>
 
