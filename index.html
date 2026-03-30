@@ -656,8 +656,8 @@ const SHEET_NAME = 'Tabellenblatt1';
 const COLS = ['rowKey','id','name','weingut','weintyp','traubensorten','jahrgang',
   'trinkreifVon','trinkreifBis','land','region','appellation','qualitaetsstufe',
   'alkohol','fuellmenge','lagerort','bestand','preis','einkaufsdatum',
-  'bewertung','notizen','weinSignatur','updatedAt','fotoVorneUrl','fotoHintenUrl'];
-// Spalten A–Y (25 Spalten), Fotos als Drive-Links in X + Y
+  'bewertung','notizen','weinSignatur','updatedAt','fotoVorneUrl','fotoHintenUrl','tagespreisChf'];
+// Spalten A–Z (26 Spalten), Z = Tagespreis CHF
 
 // ================================================================
 // STATE
@@ -744,50 +744,84 @@ async function testGeminiKey() {
 }
 
 // ----------------------------------------------------------------
-// GEMINI PREISSUCHE
+// GEMINI PREISSUCHE — Kernfunktion mit Jahrgangs-Fallback
 // ----------------------------------------------------------------
-async function searchPriceWithGemini(fav) {
+async function geminiPriceQuery(name, weintyp, jahrgang) {
   const key = getGeminiKey();
   if (!key) {
     toast('⚠️ Kein Gemini API Key — bitte in Einstellungen eintragen.', 'err');
     showPage('einstellungen');
     return null;
   }
-
-  const jahrgang = fav.jahrgang ? ` ${fav.jahrgang}` : '';
+  const jgStr = jahrgang ? ` ${jahrgang}` : '';
   const prompt = `Du bist ein Weinexperte. Suche den aktuellen Detailhandelspreis für diesen Wein in der Schweiz:
 
-Wein: ${fav.name}${jahrgang}
-Weintyp: ${fav.weintyp}
+Wein: ${name}${jgStr}
+Weintyp: ${weintyp}
 
 Bitte antworte im folgenden JSON-Format (nichts anderes, kein Markdown):
 {
   "preis_chf": 24.50,
-  "preis_range": "22–28",
+  "preis_range": "22-28",
+  "jahrgang_gefunden": 2019,
   "quelle": "z.B. Denner, Flaschenpost.ch",
-  "verfuegbar_in_ch": true,
   "hinweis": "kurzer Kommentar falls nötig"
 }
 
-Wenn kein Preis bekannt ist, setze preis_chf auf null.`;
+Wenn kein Preis für diesen Jahrgang bekannt ist, versuche einen ähnlichen Jahrgang und schreibe ihn in jahrgang_gefunden.
+Wenn wirklich kein Preis ermittelt werden kann, setze preis_chf auf null.`;
 
-  try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) }
-    );
-    const d = await res.json();
-    if (d.error) throw new Error(d.error.message);
-    const raw = d.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-    // JSON aus Antwort extrahieren
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error('Kein JSON in Antwort');
-    return JSON.parse(jsonMatch[0]);
-  } catch(e) {
-    toast('Gemini Fehler: ' + e.message, 'err');
-    return null;
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) }
+  );
+  const d = await res.json();
+  if (d.error) throw new Error(d.error.message);
+  const raw = d.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('Kein JSON in Antwort');
+  return JSON.parse(jsonMatch[0]);
+}
+
+// Wrapper mit automatischem Jahrgangs-Fallback
+async function searchPriceWithFallback(name, weintyp, jahrgang) {
+  const key = getGeminiKey();
+  if (!key) { toast('⚠️ Gemini API Key fehlt.','err'); showPage('einstellungen'); return null; }
+
+  const currentYear = new Date().getFullYear();
+  const tryYears = [];
+
+  // Zuerst exakter Jahrgang, dann jüngere Jahre bis aktuell
+  if (jahrgang) {
+    tryYears.push(parseInt(jahrgang));
+    for (let y = parseInt(jahrgang)+1; y <= currentYear; y++) tryYears.push(y);
   }
+  tryYears.push(null); // Letzter Versuch ohne Jahrgang
+
+  for (const yr of tryYears) {
+    try {
+      const result = await geminiPriceQuery(name, weintyp, yr);
+      if (result && result.preis_chf != null) {
+        // Jahrgangs-Hinweis wenn anderer Jahrgang verwendet wurde
+        if (yr !== parseInt(jahrgang) && yr !== null) {
+          result.hinweis = (result.hinweis ? result.hinweis + ' ' : '') +
+            `(Kein Preis für ${jahrgang} — Treffer mit Jahrgang ${yr})`;
+        }
+        return result;
+      }
+    } catch(e) {
+      // Bei Netzwerkfehler direkt abbrechen
+      toast('Gemini Fehler: ' + e.message, 'err');
+      return null;
+    }
+  }
+  return { preis_chf: null, hinweis: 'Kein Preis gefunden für diesen Wein.' };
+}
+
+// Legacy-Wrapper für Favoriten
+async function searchPriceWithGemini(fav) {
+  return searchPriceWithFallback(fav.name, fav.weintyp, fav.jahrgang);
 }
 
 // Preis-Button für Favoritenkarte
@@ -828,6 +862,56 @@ async function applyFavPrice(rowKey, preis) {
   if (isConnected) await saveFavRow(f).catch(()=>{});
   renderFavoriten();
   toast(`Preis CHF ${preis.toFixed(2)} gespeichert.`);
+}
+
+// ----------------------------------------------------------------
+// PREISSUCHE FÜR INVENTAR-WEINE
+// ----------------------------------------------------------------
+async function weinSearchPrice(rowKey) {
+  const w = wines.find(x => x.rowKey === rowKey);
+  if (!w) return;
+  const btn = document.getElementById('inv-price-btn-' + rowKey);
+  const resultDiv = document.getElementById('inv-price-result-' + rowKey);
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Suche…'; }
+
+  const result = await searchPriceWithFallback(w.name, w.weintyp, w.jahrgang);
+
+  if (btn) { btn.disabled = false; btn.textContent = '💰 Tagespreis'; }
+  if (!result) return;
+
+  const preis = result.preis_chf;
+  const range = result.preis_range;
+  const quelle = result.quelle || '';
+  const hinweis = result.hinweis || '';
+
+  if (resultDiv) {
+    resultDiv.style.display = '';
+    resultDiv.innerHTML = preis
+      ? `<div style="background:var(--bg);border:1px solid var(--border);border-radius:7px;padding:8px 11px;font-size:.8rem;margin-top:6px">
+          <div>💰 <strong>Tagespreis: CHF ${preis.toFixed(2)}</strong>${range?' (Spanne: CHF '+range+')':''}</div>
+          ${quelle?`<div style="color:var(--muted);margin-top:2px">🔗 ${esc(quelle)}</div>`:''}
+          ${hinweis?`<div style="color:var(--muted);font-size:.75rem;margin-top:2px">${esc(hinweis)}</div>`:''}
+          <button onclick="applyWeinTagespreis(${rowKey},${preis})" class="btn btn-primary btn-sm" style="margin-top:7px;font-size:.75rem">✔ Tagespreis übernehmen (CHF ${preis.toFixed(2)})</button>
+         </div>`
+      : `<div style="font-size:.78rem;color:var(--muted);padding:6px;margin-top:4px">ℹ️ Kein Preis gefunden${hinweis?' — '+esc(hinweis):''}.</div>`;
+  }
+}
+
+async function applyWeinTagespreis(rowKey, preis) {
+  const w = wines.find(x => x.rowKey === rowKey);
+  if (!w) return;
+  w.tagespreisChf = parseFloat(preis.toFixed(2));
+  w.updatedAt = new Date().toISOString();
+  if (isConnected) {
+    try { await sheetsUpdate(w.sheetRow, weinToRow(w)); updateSyncTime(); }
+    catch(e) { toast('Sync-Fehler: '+e.message,'err'); }
+  }
+  saveLocal();
+  // Wenn Detail-Seite offen: neu rendern
+  const detailPage = document.getElementById('page-detail');
+  if (detailPage && detailPage.style.display !== 'none') renderDetail(rowKey);
+  else renderInventar();
+  toast(`Tagespreis CHF ${preis.toFixed(2)} gespeichert.`);
 }
 
 function toggleConfig() {
@@ -913,7 +997,7 @@ async function sheetsGet(range) {
 }
 
 async function sheetsAppend(values) {
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent(SHEET_NAME)}!A1:Y1:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent(SHEET_NAME)}!A1:Z1:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
   const r = await fetch(url, {
     method: 'POST',
     headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
@@ -925,7 +1009,7 @@ async function sheetsAppend(values) {
 
 async function sheetsUpdate(row, values) {
   // row = 1-based sheet row number (2 = first data row)
-  const range = `${SHEET_NAME}!A${row}:Y${row}`;
+  const range = `${SHEET_NAME}!A${row}:Z${row}`;
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent(range)}?valueInputOption=RAW`;
   const r = await fetch(url, {
     method: 'PUT',
@@ -937,7 +1021,7 @@ async function sheetsUpdate(row, values) {
 }
 
 async function sheetsClear(row) {
-  const range = `${SHEET_NAME}!A${row}:Y${row}`;
+  const range = `${SHEET_NAME}!A${row}:Z${row}`;
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent(range)}:clear`;
   const r = await fetch(url, {
     method: 'POST',
@@ -954,7 +1038,7 @@ async function loadFromSheets() {
   if (!accessToken) { loadLocalFallback(); return; }
   setStatus('loading', 'Lade aus Google Sheets…');
   try {
-    const data = await sheetsGet(`${SHEET_NAME}!A2:Y1000`);
+    const data = await sheetsGet(`${SHEET_NAME}!A2:Z1000`);
     const rows = data.values || [];
     wines = rows
       .filter(r => r[0] && r[2]) // rowKey und name vorhanden
@@ -986,9 +1070,9 @@ function rowToWein(r, sheetRow) {
     preis: get(17), einkaufsdatum: get(18),
     bewertung: get(19) ? parseInt(get(19)) : null,
     notizen: get(20), weinSignatur: get(21), updatedAt: get(22),
-    fotoVorneUrl: get(23) || null,   // Google Drive Link
-    fotoHintenUrl: get(24) || null,  // Google Drive Link
-    // Fotos (base64) kommen aus lokalem IndexedDB-Cache
+    fotoVorneUrl: get(23) || null,
+    fotoHintenUrl: get(24) || null,
+    tagespreisChf: get(25) ? parseFloat(get(25)) : null,
     fotoVorne: null, fotoHinten: null,
   };
 }
@@ -1008,6 +1092,7 @@ function weinToRow(w, nextKey) {
     w.bewertung ? String(w.bewertung) : '',
     w.notizen||'', sig, new Date().toISOString(),
     w.fotoVorneUrl||'', w.fotoHintenUrl||'',
+    w.tagespreisChf!=null ? String(w.tagespreisChf) : '',
   ]];
 }
 
@@ -1153,7 +1238,12 @@ function cardHTML(w) {
         <button class="btn-icon" onclick="changeBestand(${w.rowKey},1)">
           <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </button>
+        <button class="btn-icon" id="inv-price-btn-${w.rowKey}" onclick="event.stopPropagation();weinSearchPrice(${w.rowKey})" title="Tagespreis suchen" style="color:var(--accent);border-color:var(--accent)">
+          💰
+        </button>
       </div>
+      ${w.tagespreisChf!=null?`<div style="font-size:.72rem;color:var(--accent);font-weight:600;margin-top:3px">💰 CHF ${w.tagespreisChf.toFixed(2)}</div>`:''}
+      <div id="inv-price-result-${w.rowKey}" style="display:none"></div>
     </div>
   </div>`;
 }
@@ -1186,6 +1276,7 @@ function renderDetail(key) {
   if (!w) { showPage('inventar'); return; }
   document.getElementById('detail-acts').innerHTML = `
     <button class="btn btn-outline btn-sm" onclick="openEditForm(${key})">✏️ Bearbeiten</button>
+    <button class="btn btn-outline btn-sm" id="inv-price-btn-${key}" onclick="weinSearchPrice(${key})" style="color:var(--accent);border-color:var(--accent)">💰 Tagespreis suchen</button>
     <button class="btn btn-outline btn-sm" style="color:var(--danger);border-color:color-mix(in srgb,var(--danger) 40%,transparent)" onclick="openDel(${key})">🗑 Löschen</button>`;
   document.getElementById('detail-content').innerHTML = `
     <div class="detail-hero">
@@ -1223,10 +1314,12 @@ function renderDetail(key) {
         ${df('Füllmenge',w.fuellmenge)}${df('Lagerort',w.lagerort)}
         ${df('Trinkreif von',w.trinkreifVon)}${df('Trinkreif bis',w.trinkreifBis)}
         ${df('Einkaufspreis',w.preis?'CHF '+parseFloat(w.preis).toFixed(2):'')}${df('Einkaufsdatum',w.einkaufsdatum)}
+        ${df('Tagespreis',w.tagespreisChf!=null?'CHF '+w.tagespreisChf.toFixed(2):'')}
       </div>
     </div>
     ${w.notizen?`<div class="detail-card"><h2>Notizen</h2><p style="font-size:.9rem;white-space:pre-wrap">${esc(w.notizen)}</p></div>`:''}
-    <div style="font-size:.7rem;font-family:monospace;color:var(--muted);opacity:.45;word-break:break-all">ID: ${esc(w.weinSignatur)}</div>`;
+    <div style="font-size:.7rem;font-family:monospace;color:var(--muted);opacity:.45;word-break:break-all">ID: ${esc(w.weinSignatur)}</div>
+    <div id="inv-price-result-${w.rowKey}" style="display:none"></div>`;
 }
 
 function df(label, val) {
