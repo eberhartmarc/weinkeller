@@ -503,7 +503,8 @@ const SHEET_NAME = 'Tabellenblatt1';
 const COLS = ['rowKey','id','name','weingut','weintyp','traubensorten','jahrgang',
   'trinkreifVon','trinkreifBis','land','region','appellation','qualitaetsstufe',
   'alkohol','fuellmenge','lagerort','bestand','preis','einkaufsdatum',
-  'bewertung','notizen','weinSignatur','updatedAt'];
+  'bewertung','notizen','weinSignatur','updatedAt','fotoVorneUrl','fotoHintenUrl'];
+// Spalten A–Y (25 Spalten), Fotos als Drive-Links in X + Y
 
 // ================================================================
 // STATE
@@ -572,7 +573,7 @@ function initGoogleAuth() {
 function initTokenClient(cid) {
   const client = google.accounts.oauth2.initTokenClient({
     client_id: cid,
-    scope: 'https://www.googleapis.com/auth/spreadsheets',
+    scope: 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file',
     callback: (resp) => {
       if (resp.error) {
         setStatus('err', '❌ Anmeldung fehlgeschlagen: ' + resp.error);
@@ -601,7 +602,7 @@ async function sheetsGet(range) {
 }
 
 async function sheetsAppend(values) {
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent(SHEET_NAME)}!A1:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent(SHEET_NAME)}!A1:Y1:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
   const r = await fetch(url, {
     method: 'POST',
     headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
@@ -613,7 +614,7 @@ async function sheetsAppend(values) {
 
 async function sheetsUpdate(row, values) {
   // row = 1-based sheet row number (2 = first data row)
-  const range = `${SHEET_NAME}!A${row}:W${row}`;
+  const range = `${SHEET_NAME}!A${row}:Y${row}`;
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent(range)}?valueInputOption=RAW`;
   const r = await fetch(url, {
     method: 'PUT',
@@ -625,7 +626,7 @@ async function sheetsUpdate(row, values) {
 }
 
 async function sheetsClear(row) {
-  const range = `${SHEET_NAME}!A${row}:W${row}`;
+  const range = `${SHEET_NAME}!A${row}:Y${row}`;
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent(range)}:clear`;
   const r = await fetch(url, {
     method: 'POST',
@@ -642,7 +643,7 @@ async function loadFromSheets() {
   if (!accessToken) { loadLocalFallback(); return; }
   setStatus('loading', 'Lade aus Google Sheets…');
   try {
-    const data = await sheetsGet(`${SHEET_NAME}!A2:W1000`);
+    const data = await sheetsGet(`${SHEET_NAME}!A2:Y1000`);
     const rows = data.values || [];
     wines = rows
       .filter(r => r[0] && r[2]) // rowKey und name vorhanden
@@ -674,7 +675,9 @@ function rowToWein(r, sheetRow) {
     preis: get(17), einkaufsdatum: get(18),
     bewertung: get(19) ? parseInt(get(19)) : null,
     notizen: get(20), weinSignatur: get(21), updatedAt: get(22),
-    // Fotos kommen aus lokalem Cache (IndexedDB)
+    fotoVorneUrl: get(23) || null,   // Google Drive Link
+    fotoHintenUrl: get(24) || null,  // Google Drive Link
+    // Fotos (base64) kommen aus lokalem IndexedDB-Cache
     fotoVorne: null, fotoHinten: null,
   };
 }
@@ -693,6 +696,7 @@ function weinToRow(w, nextKey) {
     w.einkaufsdatum||todayStr(),
     w.bewertung ? String(w.bewertung) : '',
     w.notizen||'', sig, new Date().toISOString(),
+    w.fotoVorneUrl||'', w.fotoHintenUrl||'',
   ]];
 }
 
@@ -804,7 +808,7 @@ function cardHTML(w) {
   const e = w.bestand===0;
   return `<div class="wine-card" onclick="showPage('detail',${w.rowKey})">
     <div class="wine-card-photo">
-      ${w.fotoVorne?`<img src="${w.fotoVorne}" alt="">`:`<svg class="no-photo" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.2" viewBox="0 0 24 24"><path d="M8 3h8l-1.5 5a5 5 0 01-5 0L8 3z"/><rect x="11" y="11" width="2" height="5"/><rect x="8" y="16" width="8" height="1.5" rx=".75"/></svg>`}
+      ${(w.fotoVorne||w.fotoVorneUrl)?`<img src="${w.fotoVorne||w.fotoVorneUrl}" alt="" onerror="this.style.display='none'">`:`<svg class="no-photo" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.2" viewBox="0 0 24 24"><path d="M8 3h8l-1.5 5a5 5 0 01-5 0L8 3z"/><rect x="11" y="11" width="2" height="5"/><rect x="8" y="16" width="8" height="1.5" rx=".75"/></svg>`}
       <div class="card-badges"><span class="badge badge-${w.weintyp.toLowerCase()}">${w.weintyp}</span></div>
       <div class="card-bestand ${e?'empty':''}">${e?'Leer':w.bestand+'×'}</div>
     </div>
@@ -858,8 +862,8 @@ function renderDetail(key) {
   document.getElementById('detail-content').innerHTML = `
     <div class="detail-hero">
       <div class="detail-photos">
-        <div class="detail-photo">${w.fotoVorne?`<img src="${w.fotoVorne}" alt="">`:`<svg class="no-photo" width="38" height="38" fill="none" stroke="currentColor" stroke-width="1.2" viewBox="0 0 24 24"><path d="M8 3h8l-1.5 5a5 5 0 01-5 0L8 3z"/><rect x="11" y="11" width="2" height="5"/><rect x="8" y="16" width="8" height="1.5" rx=".75"/></svg>`}</div>
-        ${w.fotoHinten?`<div class="detail-photo"><img src="${w.fotoHinten}" alt=""></div>`:''}
+        <div class="detail-photo">${(w.fotoVorne||w.fotoVorneUrl)?`<img src="${w.fotoVorne||w.fotoVorneUrl}" alt="" onerror="this.style.display='none'">`:`<svg class="no-photo" width="38" height="38" fill="none" stroke="currentColor" stroke-width="1.2" viewBox="0 0 24 24"><path d="M8 3h8l-1.5 5a5 5 0 01-5 0L8 3z"/><rect x="11" y="11" width="2" height="5"/><rect x="8" y="16" width="8" height="1.5" rx=".75"/></svg>`}</div>
+        ${(w.fotoHinten||w.fotoHintenUrl)?`<div class="detail-photo"><img src="${w.fotoHinten||w.fotoHintenUrl}" alt="" onerror="this.style.display='none'"></div>`:''}
       </div>
       <div class="detail-info">
         <div><span class="badge badge-${w.weintyp.toLowerCase()}">${w.weintyp}</span></div>
@@ -972,6 +976,19 @@ async function submitForm(e) {
   const dup=wines.find(w=>w.weinSignatur===sig&&w.rowKey!==editingKey);
   if (dup) { toast('Dieser Wein ist bereits erfasst.','err'); return; }
 
+  // Validierung
+  const valWarnings = validateWein({
+    jahrgang: gv('fjg'), alkohol: gv('fal'), fuellmenge: gv('ffm'),
+    preis: gv('fpr'), trinkreifVon: gv('ftrv'), trinkreifBis: gv('ftrb'),
+  });
+  if (valWarnings.length) {
+    showValidationWarnings(valWarnings);
+    // Warnungen zeigen, aber nach 500ms trotzdem weiter speichern erlauben
+    // Nur echte Fehler (nicht Suggestions) stoppen den Speichervorgang kurz
+    const hasErrors = valWarnings.some(w => !w.isSuggestion);
+    if (hasErrors) { toast('Bitte Hinweise prüfen — Speichern trotzdem möglich.', 'err'); }
+  }
+
   const nextKey = editingKey || (Math.max(0,...wines.map(w=>w.rowKey||0))+1);
   const wein = {
     rowKey:nextKey, id:sig, name, weingut, weintyp,
@@ -984,6 +1001,8 @@ async function submitForm(e) {
     preis:gv('fpr')||null, einkaufsdatum:gv('fed')||todayStr(),
     bewertung:fStarVal, notizen:gv('fno')||null,
     fotoVorne:photoData.v, fotoHinten:photoData.h,
+    fotoVorneUrl: editingKey ? (wines.find(w=>w.rowKey===editingKey)?.fotoVorneUrl||null) : null,
+    fotoHintenUrl: editingKey ? (wines.find(w=>w.rowKey===editingKey)?.fotoHintenUrl||null) : null,
     weinSignatur:sig, updatedAt:new Date().toISOString(),
   };
 
@@ -991,6 +1010,20 @@ async function submitForm(e) {
   document.getElementById('submit-btn').disabled=true;
 
   try {
+    // Google Drive Foto-Upload (wenn verbunden und neue Fotos vorhanden)
+    if (isConnected) {
+      const ts = Date.now();
+      const safeName = sig.replace(/[^a-zA-Z0-9_-]/g,'_').substring(0,40);
+      if (photoData.v) {
+        const url = await uploadPhotoToDrive(photoData.v, `${safeName}_vorne_${ts}.jpg`);
+        if (url) { wein.fotoVorneUrl = url; toast('Foto Vorne in Google Drive gespeichert.'); }
+      }
+      if (photoData.h) {
+        const url = await uploadPhotoToDrive(photoData.h, `${safeName}_hinten_${ts}.jpg`);
+        if (url) { wein.fotoHintenUrl = url; }
+      }
+    }
+
     if (isConnected) {
       if (editingKey!=null) {
         const existing=wines.find(w=>w.rowKey===editingKey);
@@ -1094,6 +1127,433 @@ async function doOCR(side) {
   finally { btn.disabled=false; btn.textContent=side==='v'?'🔍 OCR Vorne':'🔍 OCR Hinten'; }
 }
 function loadScript(src) { return new Promise((res,rej)=>{ const s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=rej; document.head.appendChild(s); }); }
+
+// ================================================================
+// OCR ENGINE v2 — robuste Extraktion mit Erkennungs-Panel
+// ================================================================
+
+// Normalisierungsfunktionen
+function normJahrgang(text) {
+  // Alle 4-stelligen Jahreszahlen 1900-2030 sammeln
+  const matches = [...text.matchAll(/\b((?:19|20)\d{2})\b/g)].map(m => parseInt(m[1]));
+  if (!matches.length) return null;
+  // Wahrscheinlichster Jahrgang: neueste ≤ aktuellem Jahr
+  const currentYear = new Date().getFullYear();
+  const valid = matches.filter(y => y >= 1950 && y <= currentYear);
+  if (!valid.length) return null;
+  // Häufigsten nehmen, bei Gleichstand den neusten
+  const freq = {};
+  valid.forEach(y => freq[y] = (freq[y]||0)+1);
+  return Object.entries(freq).sort((a,b) => b[1]-a[1] || b[0]-a[0])[0][0];
+}
+
+function normAlkohol(text) {
+  // Viele Schreibweisen: 13,5% vol / Alc. 14.5% / 12,5%vol / alk 13.0
+  const patterns = [
+    /(\d{1,2}[.,]\d{1,2})\s*%\s*(?:vol\.?|alc\.?|alk\.?)/i,
+    /(?:alc\.?|alk\.?|alcool)\s*[:.]?\s*(\d{1,2}[.,]\d{1,2})\s*%/i,
+    /(\d{1,2}[.,]\d)\s*(?:%|°)/,
+  ];
+  for (const p of patterns) {
+    const m = text.match(p);
+    if (m) {
+      const v = parseFloat(m[1].replace(',','.'));
+      if (v >= 5 && v <= 25) return v;
+    }
+  }
+  return null;
+}
+
+function normFuellmenge(text) {
+  // 75cl / 75 cl / 750ml / 0,75l / 0.75L / 75CL / 1.5l / 50cl
+  const knownCl = [18,20,25,37,50,75,100,150,200,300,500];
+  // cl direkt
+  let m = text.match(/(\d+)\s*[cC][lL]\b/);
+  if (m) { const v=parseInt(m[1]); if(v>=10&&v<=300) return v+' cl'; }
+  // ml
+  m = text.match(/(\d{3,4})\s*[mM][lL]\b/);
+  if (m) { const v=Math.round(parseInt(m[1])/10); if(v>=10&&v<=300) return v+' cl'; }
+  // Liter: 0.75 l / 1.5 l / 0,75L
+  m = text.match(/([01][.,]\d{1,3})\s*[lL]\b/);
+  if (m) { const v=Math.round(parseFloat(m[1].replace(',','.'))*100); if(v>=10&&v<=300) return v+' cl'; }
+  // Liter ganz: 1 l / 1.5 l
+  m = text.match(/\b([123])\s*[lL]\b/);
+  if (m) { return (parseInt(m[1])*100)+' cl'; }
+  return null;
+}
+
+function normPreis(text) {
+  // CHF 24.50 / Fr. 18.- / 12.90 CHF / € 15
+  const m = text.match(/(?:CHF|Fr\.?|€|EUR|\$)\s*(\d+[.,]\d{0,2})|(?:(\d+[.,]\d{0,2})\s*(?:CHF|Fr\.?|€|EUR))/);
+  if (m) { return parseFloat((m[1]||m[2]).replace(',','.')).toFixed(2); }
+  return null;
+}
+
+function extractTextBlocks(text) {
+  // Zeilen bereinigen: OCR-Artefakte entfernen, leere Zeilen raus
+  return text.split('\n')
+    .map(l => l.replace(/[|{}\[\]\\]/g,' ').replace(/\s+/g,' ').trim())
+    .filter(l => l.length > 2);
+}
+
+function guessName(lines) {
+  // Längste Zeile in oberer Hälfte die kein Jahrgang/Alkohol/Füllmenge ist
+  const top = lines.slice(0, Math.ceil(lines.length/2));
+  const candidates = top.filter(l => {
+    if (/^\d{4}$/.test(l.trim())) return false; // nur Jahrgang
+    if (/\d+[.,]\d+\s*%/.test(l)) return false;   // Alkohol
+    if (/\d+\s*cl/i.test(l)) return false;          // Füllmenge
+    if (l.length < 4) return false;
+    return true;
+  });
+  return candidates.sort((a,b) => b.length-a.length)[0] || null;
+}
+
+function guessWeingut(lines, nameGuess) {
+  // Zweitlängste relevante Zeile die nicht der Name ist
+  const candidates = lines.filter(l => {
+    if (l === nameGuess) return false;
+    if (/^\d{4}$/.test(l.trim())) return false;
+    if (/\d+[.,]\d+\s*%/.test(l)) return false;
+    if (/\d+\s*cl/i.test(l)) return false;
+    if (l.length < 3) return false;
+    return true;
+  });
+  return candidates.sort((a,b) => b.length-a.length)[0] || null;
+}
+
+function guessAppellation(text) {
+  // AOC / AOP / DOC / DOCG / IGP / IGT am Ende einer Zeile
+  const m = text.match(/([A-Za-zÀ-ÿ\s-]+(?:AOC|AOP|DOC|DOCG|IGP|IGT|PDO|DOP))/i);
+  return m ? m[1].trim() : null;
+}
+
+function guessLand(text) {
+  const lmap = {
+    'Frankreich':'France|Alsace|Alsasz|Bordeaux|Burgund|Bourgogne|Champagne|Loire|Rhône|Rhone|Languedoc',
+    'Schweiz':'Schweiz|Suisse|Svizzera|Wallis|Valais|Waadt|Vaud|Zürich|Aargau|Thurgau|Bündner|Graubünden|Bielersee|Schaffhausen',
+    'Deutschland':'Deutschland|Germany|Mosel|Rheingau|Pfalz|Baden|Württemberg|Franken',
+    'Italien':'Italia|Italy|Toscana|Piemont|Veneto|Barolo|Chianti|Brunello|Amarone|Prosecco|Sicilia',
+    'Spanien':'España|Spain|Rioja|Ribera|Priorat|Cava|Penedès',
+    'Österreich':'Österreich|Austria|Wachau|Burgenland|Steiermark|Niederösterreich',
+    'Portugal':'Portugal|Douro|Alentejo|Vinho Verde|Porto',
+    'USA':'California|Napa|Sonoma|Oregon|Washington|USA',
+    'Australien':'Australia|Barossa|McLaren|Hunter',
+    'Neuseeland':'New Zealand|Marlborough|Neuseeland',
+    'Argentinien':'Argentina|Mendoza|Malbec',
+    'Chile':'Chile|Maipo|Colchagua',
+  };
+  for (const [land, pattern] of Object.entries(lmap)) {
+    if (new RegExp(pattern, 'i').test(text)) return land;
+  }
+  return null;
+}
+
+function guessRegion(text) {
+  const regions = [
+    ['Elsass','Alsace|Alsász|Elsass'],['Burgund','Bourgogne|Burgundy|Côte d'],
+    ['Bordeaux','Bordeaux|Médoc|Pomerol|Saint-Emilion'],['Champagne','Champagne|Reims|Épernay'],
+    ['Loire','Loire|Sancerre|Pouilly|Muscadet'],['Rhône','Rhône|Rhone|Châteauneuf|Gigondas'],
+    ['Languedoc','Languedoc|Roussillon|Corbières'],['Wallis','Valais|Wallis'],
+    ['Waadt','Vaud|Waadt|Lavaux'],['Aargau','Aargau|Argovia'],
+    ['Bielersee','Bielersee|Lac de Bienne'],['Zürich','Zürich|Zuerich'],
+    ['Mosel','Mosel|Moselle'],['Rheingau','Rheingau'],['Pfalz','Pfalz|Palatinate'],
+    ['Toskana','Toscana|Tuscany|Chianti|Brunello'],['Piemont','Piemont|Piedmont|Barolo|Barbaresco'],
+    ['Rioja','Rioja'],['Wachau','Wachau'],['Priorat','Priorat|Priorato'],
+    ['Barossa Valley','Barossa'],['Napa Valley','Napa'],['Mendoza','Mendoza'],
+    ['Marlborough','Marlborough'],
+  ];
+  for (const [region, pattern] of regions) {
+    if (new RegExp(pattern,'i').test(text)) return region;
+  }
+  return null;
+}
+
+// Haupt-OCR-Funktion: gibt strukturiertes Ergebnis-Objekt zurück
+function parseOCRText(rawText) {
+  const lines = extractTextBlocks(rawText);
+  const fullText = lines.join(' ');
+
+  const jahrgang = normJahrgang(fullText);
+  const alkohol  = normAlkohol(fullText);
+  const fuellmenge = normFuellmenge(fullText);
+  const preis    = normPreis(fullText);
+  const land     = guessLand(fullText);
+  const region   = guessRegion(fullText);
+  const appellation = guessAppellation(fullText);
+  const nameSugg = guessName(lines);
+  const weingutSugg = guessWeingut(lines, nameSugg);
+
+  return {
+    jahrgang:   { value: jahrgang,    confidence: jahrgang  ? 'high' : 'none', label:'Jahrgang' },
+    alkohol:    { value: alkohol,     confidence: alkohol   ? 'high' : 'none', label:'Alkohol %' },
+    fuellmenge: { value: fuellmenge,  confidence: fuellmenge? 'high' : 'none', label:'Füllmenge' },
+    preis:      { value: preis,       confidence: preis     ? 'mid'  : 'none', label:'Preis CHF' },
+    land:       { value: land,        confidence: land      ? 'mid'  : 'none', label:'Land' },
+    region:     { value: region,      confidence: region    ? 'mid'  : 'none', label:'Region' },
+    appellation:{ value: appellation, confidence: appellation?'mid'  : 'none', label:'Appellation' },
+    name:       { value: nameSugg,    confidence: nameSugg  ? 'low'  : 'none', label:'Name (Vorschlag)' },
+    weingut:    { value: weingutSugg, confidence: weingutSugg?'low'  : 'none', label:'Weingut (Vorschlag)' },
+  };
+}
+
+// OCR-Panel im Formular rendern
+function renderOCRPanel(result, side) {
+  const panelId = 'ocr-panel-'+side;
+  let existing = document.getElementById(panelId);
+  if (!existing) {
+    existing = document.createElement('div');
+    existing.id = panelId;
+    existing.style.cssText = 'margin-top:10px;background:var(--bg);border:1.5px solid var(--border);border-radius:10px;padding:12px;font-size:.82rem;';
+    document.getElementById('ocr-'+side+'-out').parentNode.insertBefore(existing, document.getElementById('ocr-'+side+'-out').nextSibling);
+  }
+
+  const confColor = { high:'#16a34a', mid:'#c8860a', low:'#7a6670', none:'#ccc' };
+  const confLabel = { high:'✅', mid:'🟡', low:'💡', none:'—' };
+
+  let html = '<div style="font-weight:700;margin-bottom:8px;color:var(--text)">🔍 Erkannte Felder — klicke zum Übernehmen:</div>';
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">';
+
+  const fieldMap = {
+    jahrgang: 'fjg', alkohol: 'fal', fuellmenge: 'ffm', preis: 'fpr',
+    land: 'fla', region: 'frg', appellation: 'fap', name: 'fn', weingut: 'fwg',
+  };
+
+  for (const [key, data] of Object.entries(result)) {
+    if (data.confidence === 'none') continue;
+    const fieldId = fieldMap[key];
+    const color = confColor[data.confidence];
+    const icon  = confLabel[data.confidence];
+    html += `<button type="button" onclick="applyOCRField('${fieldId}','${String(data.value).replace(/'/g,"\\'")}')"
+      style="text-align:left;padding:6px 9px;border:1.5px solid ${color};border-radius:7px;
+             background:var(--surface);cursor:pointer;transition:background .12s;"
+      onmouseover="this.style.background='var(--border)'" onmouseout="this.style.background='var(--surface)'">
+      <div style="font-size:.7rem;color:${color};font-weight:700">${icon} ${data.label}</div>
+      <div style="font-weight:600;margin-top:2px;word-break:break-word">${esc(String(data.value))}</div>
+    </button>`;
+  }
+  html += '</div>';
+  html += '<button type="button" onclick="applyAllOCR('+JSON.stringify(result)+')"
+    style="margin-top:8px;width:100%;padding:7px;background:var(--primary);color:var(--primary-fg);
+           border:none;border-radius:8px;font-weight:700;font-size:.82rem;cursor:pointer">
+    ⬇️ Alle übernehmen
+  </button>';
+
+  existing.innerHTML = html;
+  existing.style.display = '';
+}
+
+function applyOCRField(fieldId, value) {
+  const el = document.getElementById(fieldId);
+  if (!el) return;
+  el.value = value;
+  el.style.background = 'rgba(200,134,10,0.12)';
+  setTimeout(() => { el.style.background = ''; }, 1500);
+  if (['fjg','ffm','fn','fwg'].includes(fieldId)) updSig();
+}
+
+function applyAllOCR(result) {
+  const fieldMap = {
+    jahrgang:'fjg', alkohol:'fal', fuellmenge:'ffm', preis:'fpr',
+    land:'fla', region:'frg', appellation:'fap', name:'fn', weingut:'fwg',
+  };
+  let applied = 0;
+  for (const [key, data] of Object.entries(result)) {
+    if (data.confidence === 'none' || !data.value) continue;
+    const el = document.getElementById(fieldMap[key]);
+    if (!el) continue;
+    // Nur leere Felder überschreiben (name/weingut nur wenn leer)
+    if (['name','weingut'].includes(key) && el.value.trim()) continue;
+    el.value = data.value;
+    el.style.background = 'rgba(200,134,10,0.12)';
+    setTimeout(() => { el.style.background = ''; }, 1500);
+    applied++;
+  }
+  updSig();
+  toast(`${applied} Felder übernommen — bitte prüfen!`);
+}
+
+async function doOCR(side) {
+  const src = photoData[side];
+  if (!src) { toast('Kein Foto vorhanden.', 'err'); return; }
+  const btn = document.getElementById('ocr-'+side+'-btn');
+  const out = document.getElementById('ocr-'+side+'-out');
+  btn.disabled = true;
+  btn.innerHTML = '⏳ OCR läuft…';
+  try {
+    if (typeof Tesseract === 'undefined') {
+      await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
+    }
+    // Mehrere Sprachen für bessere Erkennung europäischer Etiketten
+    const { data: { text } } = await Tesseract.recognize(src, 'deu+fra+eng+ita', {
+      logger: () => {},
+      tessedit_pageseg_mode: '6', // Uniform block of text
+    });
+    // Rohtext anzeigen
+    out.textContent = text;
+    out.style.display = '';
+    // Strukturierte Extraktion
+    const result = parseOCRText(text);
+    renderOCRPanel(result, side);
+    const found = Object.values(result).filter(d => d.confidence !== 'none').length;
+    toast(`OCR: ${found} Felder erkannt — bitte prüfen und übernehmen.`);
+  } catch(err) {
+    out.textContent = 'Fehler: ' + err.message;
+    out.style.display = '';
+    toast('OCR fehlgeschlagen: ' + err.message, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = side === 'v' ? '🔍 OCR Vorne' : '🔍 OCR Hinten';
+  }
+}
+
+// ================================================================
+// GOOGLE DRIVE FOTO-UPLOAD
+// ================================================================
+const DRIVE_FOLDER_NAME = 'WeinKeller Fotos';
+let driveFolderId = null;
+
+async function ensureDriveFolder() {
+  if (driveFolderId) return driveFolderId;
+  // Ordner suchen
+  const search = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=name='${DRIVE_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false&fields=files(id,name)`,
+    { headers: { Authorization: 'Bearer ' + accessToken } }
+  );
+  const { files } = await search.json();
+  if (files && files.length > 0) {
+    driveFolderId = files[0].id;
+    return driveFolderId;
+  }
+  // Ordner erstellen
+  const create = await fetch('https://www.googleapis.com/drive/v3/files', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: DRIVE_FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' }),
+  });
+  const folder = await create.json();
+  driveFolderId = folder.id;
+  return driveFolderId;
+}
+
+async function uploadPhotoToDrive(base64DataUrl, filename) {
+  if (!accessToken || !base64DataUrl) return null;
+  try {
+    const folderId = await ensureDriveFolder();
+    // base64 → Blob
+    const [meta, data] = base64DataUrl.split(',');
+    const mime = meta.match(/:(.*?);/)[1];
+    const binary = atob(data);
+    const arr = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
+    const blob = new Blob([arr], { type: mime });
+    // Multipart upload
+    const boundary = '-------weinkeller_boundary';
+    const metaPart = JSON.stringify({ name: filename, parents: [folderId] });
+    const formBody = new FormData();
+    formBody.append('metadata', new Blob([metaPart], { type: 'application/json' }));
+    formBody.append('file', blob);
+    const res = await fetch(
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink,webContentLink',
+      { method: 'POST', headers: { Authorization: 'Bearer ' + accessToken }, body: formBody }
+    );
+    const file = await res.json();
+    if (!file.id) return null;
+    // Datei öffentlich lesbar machen (für Vorschau)
+    await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}/permissions`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'anyone', role: 'reader' }),
+    });
+    return `https://drive.google.com/uc?id=${file.id}`;
+  } catch(e) {
+    console.warn('Drive Upload fehlgeschlagen:', e);
+    return null;
+  }
+}
+
+// ================================================================
+// VALIDIERUNG — Inline-Hinweise beim Speichern
+// ================================================================
+function validateWein(fields) {
+  const warnings = [];
+  const currentYear = new Date().getFullYear();
+
+  // Jahrgang
+  const jg = parseInt(fields.jahrgang);
+  if (jg > currentYear) warnings.push({ field:'fjg', msg:`Jahrgang ${jg} liegt in der Zukunft.` });
+  if (jg < 1900) warnings.push({ field:'fjg', msg:`Jahrgang ${jg} scheint ungewöhnlich früh.` });
+
+  // Alkohol
+  const al = parseFloat(fields.alkohol);
+  if (fields.alkohol && (al < 4 || al > 22)) warnings.push({ field:'fal', msg:`Alkohol ${al}% ausserhalb des üblichen Bereichs (4–22%).` });
+
+  // Füllmenge
+  const knownFm = ['18 cl','20 cl','25 cl','37 cl','37.5 cl','50 cl','75 cl','100 cl','150 cl','200 cl','300 cl'];
+  if (fields.fuellmenge && !knownFm.includes(fields.fuellmenge.toLowerCase().replace(/\s+/,' ').trim())) {
+    warnings.push({ field:'ffm', msg:`Füllmenge «${fields.fuellmenge}» ist unbekannt. Standard: 75 cl, 50 cl, 37.5 cl, 150 cl` });
+  }
+
+  // Preis
+  const pr = parseFloat(fields.preis);
+  if (fields.preis && (pr < 0 || pr > 10000)) warnings.push({ field:'fpr', msg:`Preis CHF ${pr} ausserhalb des plausiblen Bereichs.` });
+
+  // Trinkreif
+  const trv = parseInt(fields.trinkreifVon), trb = parseInt(fields.trinkreifBis);
+  if (trv && trb && trv > trb) warnings.push({ field:'ftrv', msg:`Trinkreif von (${trv}) ist nach Trinkreif bis (${trb}).` });
+
+  // Normalisierungsvorschläge
+  if (fields.fuellmenge) {
+    const normFm = normFuellmenge(fields.fuellmenge);
+    if (normFm && normFm !== fields.fuellmenge) {
+      warnings.push({ field:'ffm', msg:`Vorschlag: «${normFm}» statt «${fields.fuellmenge}»`, isSuggestion: true, value: normFm });
+    }
+  }
+
+  return warnings;
+}
+
+function showValidationWarnings(warnings) {
+  // Alte Warnungen entfernen
+  document.querySelectorAll('.val-warning').forEach(el => el.remove());
+  document.querySelectorAll('.val-highlight').forEach(el => el.classList.remove('val-highlight'));
+
+  if (!warnings.length) return true;
+
+  warnings.forEach(w => {
+    const field = document.getElementById(w.field);
+    if (!field) return;
+    field.style.borderColor = w.isSuggestion ? 'var(--accent)' : 'var(--danger)';
+    field.classList.add('val-highlight');
+    // Hinweis unter dem Feld einfügen
+    const hint = document.createElement('div');
+    hint.className = 'val-warning';
+    hint.style.cssText = `font-size:.75rem;margin-top:3px;color:${w.isSuggestion?'var(--accent)':'var(--danger)'};`;
+    hint.textContent = (w.isSuggestion ? '💡 ' : '⚠️ ') + w.msg;
+    if (w.isSuggestion && w.value) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = ' Übernehmen';
+      btn.style.cssText = 'margin-left:6px;color:var(--accent);background:none;border:none;cursor:pointer;font-weight:700;font-size:.75rem;text-decoration:underline;';
+      btn.onclick = () => {
+        field.value = w.value;
+        hint.remove();
+        field.style.borderColor = '';
+        updSig();
+      };
+      hint.appendChild(btn);
+    }
+    field.parentNode.insertBefore(hint, field.nextSibling);
+    // Auto-Reset nach 8s
+    setTimeout(() => { hint.remove(); field.style.borderColor = ''; }, 8000);
+  });
+
+  // Zur ersten Warnung scrollen
+  const firstField = document.getElementById(warnings[0].field);
+  if (firstField) firstField.scrollIntoView({ behavior:'smooth', block:'center' });
+
+  return false; // Hat Warnungen — aber Speichern trotzdem erlaubt (return true unten)
+}
 
 // ================================================================
 // UTILS
