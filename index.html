@@ -299,10 +299,16 @@ const SHEET_NAME = 'Tabellenblatt1';
     <div id="status-bar">
       <div id="status-dot" class="dot-loading"></div>
       <span id="status-text">Verbinde mit Google Sheets…</span>
-      <button class="btn btn-outline btn-sm" onclick="loadFromSheets()" style="margin-left:auto" id="reload-btn">
-        <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
-        Neu laden
-      </button>
+      <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
+        <button class="btn btn-outline btn-sm" id="signin-btn" onclick="retryAuth()" style="display:none;background:var(--primary);color:var(--primary-fg);border-color:var(--primary)">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+          Google Anmelden
+        </button>
+        <button class="btn btn-outline btn-sm" onclick="loadFromSheets()" id="reload-btn">
+          <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+          Neu laden
+        </button>
+      </div>
     </div>
 
     <!-- CONFIG PANEL -->
@@ -556,12 +562,13 @@ function initGoogleAuth() {
   }
 
   // Lade GIS Script wenn nötig
+  setStatus('loading', 'Lade Google-Anmeldung…');
   if (!window.google?.accounts) {
     const s = document.createElement('script');
     s.src = 'https://accounts.google.com/gsi/client';
-    s.onload = () => initTokenClient(cid);
+    s.onload = () => { setStatus('loading', 'Google-Script geladen, starte Anmeldung…'); initTokenClient(cid); };
     s.onerror = () => {
-      setStatus('err', '⚠️ Google-Verbindung fehlgeschlagen (kein Internet?)');
+      setStatus('err', '⚠️ Google-Script konnte nicht geladen werden. Internetverbindung prüfen.');
       loadLocalFallback();
     };
     document.head.appendChild(s);
@@ -587,8 +594,9 @@ function initTokenClient(cid) {
     },
   });
 
-  setStatus('loading', 'Warte auf Google-Anmeldung…');
-  client.requestAccessToken({ prompt: '' });
+  setStatus('loading', 'Warte auf Google-Anmeldung… (Pop-up erlauben!)');
+  // prompt:'select_account' zeigt immer den Dialog, verhindert stilles Scheitern
+  client.requestAccessToken({ prompt: 'select_account' });
 }
 
 // ================================================================
@@ -1564,7 +1572,23 @@ function todayStr(){return new Date().toISOString().split('T')[0];}
 function buildSig(n,wg,jg,fm){return`${(n||'').trim()}-${(wg||'').trim()}-${jg||''}-${(fm||'').trim()}`;}
 function updSig(){document.getElementById('sig-prev').textContent='Signatur: '+buildSig(gv('fn'),gv('fwg'),gv('fjg'),gv('ffm'));}
 function setView(v){currentView=v;document.getElementById('vg-btn').classList.toggle('active',v==='grid');document.getElementById('vl-btn').classList.toggle('active',v==='list');renderInventar();}
-function setStatus(type,msg){const dot=document.getElementById('status-dot');const txt=document.getElementById('status-text');txt.textContent=msg;dot.className='dot-'+type;}
+function setStatus(type,msg){
+  const dot=document.getElementById('status-dot');
+  const txt=document.getElementById('status-text');
+  const signInBtn=document.getElementById('signin-btn');
+  txt.textContent=msg;
+  dot.className='dot-'+type;
+  // "Anmelden"-Button nur bei Fehler oder nach Timeout zeigen
+  if(signInBtn) signInBtn.style.display=(type==='err'||type==='loading'&&msg.includes('Warte'))?'':'none';
+}
+
+let _authTimeout;
+function retryAuth(){
+  clearTimeout(_authTimeout);
+  const signInBtn=document.getElementById('signin-btn');
+  if(signInBtn) signInBtn.style.display='none';
+  initGoogleAuth();
+}
 function toast(msg,type){const el=document.getElementById('toast');el.textContent=msg;el.className='show'+(type==='err'?' err':'');clearTimeout(window._tt);window._tt=setTimeout(()=>{el.className='';},3200);}
 function toggleTheme(){const d=document.documentElement.classList.toggle('dark');document.getElementById('theme-icon').textContent=d?'☀️':'🌙';document.getElementById('theme-lbl').textContent=d?'Hellmodus':'Dunkelmodus';try{localStorage.setItem('wk-theme',d?'dark':'light');}catch(e){}}
 
