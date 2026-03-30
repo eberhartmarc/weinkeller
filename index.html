@@ -283,7 +283,7 @@ const SHEET_NAME = 'Tabellenblatt1';
         <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
         Favoriten
       </button>
-      <button class="nav-btn" id="nav-cfg" onclick="toggleConfig()">
+      <button class="nav-btn" id="nav-cfg" onclick="showPage('einstellungen')">
         <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93l-1.41 1.41M4.93 4.93l1.41 1.41M12 2v2M12 20v2M2 12h2M20 12h2M19.07 19.07l-1.41-1.41M4.93 19.07l1.41-1.41"/></svg>
         Einstellungen
       </button>
@@ -315,8 +315,9 @@ const SHEET_NAME = 'Tabellenblatt1';
       </div>
     </div>
 
-    <!-- CONFIG PANEL -->
-    <div id="config-panel">
+    <!-- EINSTELLUNGEN PAGE -->
+    <section id="page-einstellungen" style="display:none">
+    <div id="config-panel" style="display:block!important;border:none;padding:0;background:transparent">
       <h2 style="font-size:1rem;font-weight:700;margin-bottom:14px">⚙️ Einstellungen</h2>
 
       <!-- ABSCHNITT 1: Google-Verbindung -->
@@ -372,6 +373,7 @@ const SHEET_NAME = 'Tabellenblatt1';
         </div>
       </div>
     </div>
+    </section>
 
     <!-- INVENTAR PAGE -->
     <section id="page-inventar">
@@ -690,8 +692,9 @@ function saveConfig() {
 // ----------------------------------------------------------------
 // GEMINI API KEY VERWALTUNG
 // ----------------------------------------------------------------
+const _GEMINI_DEFAULT = 'AIzaSyCFwbj2C6J7cjFsRvw-LmKY-aT9jgCtVbo';
 function getGeminiKey() {
-  try { return localStorage.getItem('wk-gemini-key') || ''; } catch(e) { return ''; }
+  try { return localStorage.getItem('wk-gemini-key') || _GEMINI_DEFAULT; } catch(e) { return _GEMINI_DEFAULT; }
 }
 
 function saveGeminiKey() {
@@ -746,8 +749,8 @@ async function testGeminiKey() {
 async function searchPriceWithGemini(fav) {
   const key = getGeminiKey();
   if (!key) {
-    toast('⚠️ Bitte zuerst Gemini API Key in Einstellungen eintragen.', 'err');
-    toggleConfig();
+    toast('⚠️ Kein Gemini API Key — bitte in Einstellungen eintragen.', 'err');
+    showPage('einstellungen');
     return null;
   }
 
@@ -828,10 +831,8 @@ async function applyFavPrice(rowKey, preis) {
 }
 
 function toggleConfig() {
-  const p = document.getElementById('config-panel');
-  p.style.display = p.style.display === 'none' ? '' : 'none';
-  const cid = getClientId();
-  if (cid) document.getElementById('cfg-client-id').value = cid;
+  // Legacy: jetzt als Einstellungsseite
+  showPage('einstellungen');
 }
 
 // ================================================================
@@ -1078,7 +1079,7 @@ function updateSyncTime() {
 // NAVIGATION
 // ================================================================
 function showPage(p, key) {
-  ['inventar','form','detail','favoriten','fav-form'].forEach(n => {
+  ['inventar','form','detail','favoriten','fav-form','einstellungen'].forEach(n => {
     const el = document.getElementById('page-'+n);
     if (el) el.style.display = n===p ? '' : 'none';
   });
@@ -1096,6 +1097,11 @@ function showPage(p, key) {
   } else if (p==='fav-form') {
     document.getElementById('nav-fav').classList.add('active');
     if (!key) { editingFavKey=null; document.getElementById('fav-form').reset(); document.getElementById('fav-form-title').textContent='Neuer Favorit'; }
+  } else if (p==='einstellungen') {
+    document.getElementById('nav-cfg').classList.add('active');
+    // Felder vorausfüllen
+    const cid=getClientId(); if(cid) document.getElementById('cfg-client-id').value=cid;
+    const gk=getGeminiKey(); if(gk) document.getElementById('cfg-gemini-key').value=gk;
   }
 }
 
@@ -2159,11 +2165,10 @@ async function inKellerUebernehmen(rowKey) {
   if(dark)document.documentElement.classList.add('dark');
   document.getElementById('theme-icon').textContent=dark?'☀️':'🌙';
   document.getElementById('theme-lbl').textContent=dark?'Hellmodus':'Dunkelmodus';
-  // Config-Felder vorausfüllen
-  const cid=getClientId();
-  if(cid)document.getElementById('cfg-client-id').value=cid;
-  const gkey=getGeminiKey();
-  if(gkey)document.getElementById('cfg-gemini-key').value=gkey;
+  // Gemini Default vorausfüllen falls noch kein Key im localStorage
+  if(!localStorage.getItem('wk-gemini-key')) {
+    try { localStorage.setItem('wk-gemini-key', _GEMINI_DEFAULT); } catch(e){}
+  }
   // Auth starten
   initGoogleAuth();
 })();
