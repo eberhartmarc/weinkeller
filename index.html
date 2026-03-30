@@ -279,6 +279,10 @@ const SHEET_NAME = 'Tabellenblatt1';
         <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
         Neuer Wein
       </button>
+      <button class="nav-btn" id="nav-fav" onclick="showPage('favoriten')">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+        Favoriten
+      </button>
       <button class="nav-btn" id="nav-cfg" onclick="toggleConfig()">
         <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93l-1.41 1.41M4.93 4.93l1.41 1.41M12 2v2M12 20v2M2 12h2M20 12h2M19.07 19.07l-1.41-1.41M4.93 19.07l1.41-1.41"/></svg>
         Einstellungen
@@ -473,6 +477,119 @@ const SHEET_NAME = 'Tabellenblatt1';
 
         <div class="sig-preview" id="sig-prev">Signatur: …</div>
         <button type="submit" class="btn btn-primary btn-full" id="submit-btn">Wein speichern</button>
+      </form>
+    </section>
+
+    <!-- FAVORITEN PAGE -->
+    <section id="page-favoriten" style="display:none">
+      <div class="page-header">
+        <div>
+          <h1>Favoriten</h1>
+          <p id="fav-stats-line" style="color:var(--muted);font-size:.85rem">Wird geladen…</p>
+        </div>
+        <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap">
+          <a href="https://www.vivino.com/users/marc_eber/wines" target="_blank" class="btn btn-outline btn-sm">
+            <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+            Vivino Profil
+          </a>
+          <button class="btn btn-outline btn-sm" onclick="showPage('fav-form')">
+            <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+            Neuer Favorit
+          </button>
+        </div>
+      </div>
+
+      <!-- Filter -->
+      <div class="filters" style="margin-bottom:14px">
+        <input type="search" id="fav-search" placeholder="🔍 Name suchen…" oninput="renderFavoriten()" style="max-width:220px">
+        <select id="fav-filter-status" onchange="renderFavoriten()" style="max-width:150px;width:auto">
+          <option value="">Alle Status</option>
+          <option>Favorit</option>
+          <option>Wunschliste</option>
+          <option>Beobachten</option>
+          <option>Bereits im Keller</option>
+        </select>
+        <select id="fav-filter-typ" onchange="renderFavoriten()" style="max-width:130px;width:auto">
+          <option value="">Alle Typen</option>
+          <option>Weiss</option><option>Rot</option><option>Rosé</option><option>Orange</option><option>Sekt</option>
+        </select>
+      </div>
+
+      <!-- Vivino Widget -->
+      <div style="margin-bottom:18px">
+        <div class="vivino-widget user-profile-widget"
+          data-vivino-widget-type="user"
+          data-vivino-user-id="marc_eber"
+          data-vivino-widget-layout="compact">
+          <a href="https://www.vivino.com/de/users/marc_eber/latest" target="_blank" rel="nofollow"
+            style="font-size:.8rem;color:var(--muted);text-decoration:none">marc_eber auf Vivino ↗</a>
+        </div>
+      </div>
+
+      <div id="fav-container"></div>
+    </section>
+
+    <!-- FAVORIT FORMULAR -->
+    <section id="page-fav-form" style="display:none">
+      <button class="back-btn" onclick="showPage('favoriten')">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+        Zurück
+      </button>
+      <div class="page-header">
+        <div><h1 id="fav-form-title">Neuer Favorit</h1><p id="fav-form-sub" style="color:var(--muted);font-size:.875rem">Aus Vivino übernehmen</p></div>
+      </div>
+      <form id="fav-form" onsubmit="submitFavForm(event)">
+        <div class="form-section">
+          <div class="fsect-title">Vivino-Informationen</div>
+          <div class="fgrid">
+            <div class="fgroup s2">
+              <label>Vivino-Link</label>
+              <input type="url" id="ff-url" placeholder="https://www.vivino.com/de/wein-name/w/12345" oninput="parseFavUrl()">
+              <div style="font-size:.75rem;color:var(--muted);margin-top:3px">Link einfügen — Name, ID und Jahrgang werden automatisch erkannt</div>
+            </div>
+            <div class="fgroup">
+              <label>Vivino Wine ID</label>
+              <input type="text" id="ff-wineid" placeholder="z.B. 1135982" readonly style="background:var(--muted)/10;opacity:.7">
+            </div>
+            <div class="fgroup">
+              <label>Status</label>
+              <select id="ff-status">
+                <option>Favorit</option>
+                <option>Wunschliste</option>
+                <option>Beobachten</option>
+                <option>Bereits im Keller</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="form-section">
+          <div class="fsect-title">Weindetails</div>
+          <div class="fgrid">
+            <div class="fgroup"><label>Name *</label><input type="text" id="ff-name" required placeholder="Weinname"></div>
+            <div class="fgroup"><label>Weintyp</label>
+              <select id="ff-weintyp">
+                <option>Rot</option><option>Weiss</option><option>Rosé</option><option>Orange</option><option>Sekt</option>
+              </select>
+            </div>
+            <div class="fgroup"><label>Jahrgang</label><input type="number" id="ff-jahrgang" min="1900" max="2100" placeholder="2019"></div>
+            <div class="fgroup">
+              <label>Meine Bewertung (0.0–5.0)</label>
+              <input type="number" id="ff-bewertung" min="0" max="5" step="0.1" placeholder="4.2">
+            </div>
+            <div class="fgroup">
+              <label>Vivino-Score (letzte Sichtung)</label>
+              <input type="number" id="ff-vivino-score" min="0" max="5" step="0.1" placeholder="4.0">
+            </div>
+            <div class="fgroup">
+              <label>Preis letzte Sichtung (CHF)</label>
+              <input type="number" id="ff-preis" min="0" step="0.5" placeholder="24.50">
+            </div>
+          </div>
+        </div>
+        <div class="form-section">
+          <div class="fgroup"><label>Notiz</label><textarea id="ff-notiz" placeholder="Tasting Notes, wo gesehen, Empfehlung…"></textarea></div>
+        </div>
+        <button type="submit" class="btn btn-primary btn-full" id="fav-submit-btn">Favorit speichern</button>
       </form>
     </section>
 
@@ -793,13 +910,25 @@ function updateSyncTime() {
 // NAVIGATION
 // ================================================================
 function showPage(p, key) {
-  ['inventar','form','detail'].forEach(n => {
-    document.getElementById('page-'+n).style.display = n===p ? '' : 'none';
+  ['inventar','form','detail','favoriten','fav-form'].forEach(n => {
+    const el = document.getElementById('page-'+n);
+    if (el) el.style.display = n===p ? '' : 'none';
   });
-  ['nav-inv','nav-neu','nav-cfg'].forEach(id => document.getElementById(id)?.classList.remove('active'));
-  if (p==='inventar') { document.getElementById('nav-inv').classList.add('active'); renderInventar(); }
-  else if (p==='form') { document.getElementById('nav-neu').classList.add('active'); if (!key) openNewForm(); }
-  else if (p==='detail' && key!=null) { document.getElementById('nav-inv').classList.add('active'); renderDetail(key); }
+  ['nav-inv','nav-neu','nav-fav','nav-cfg'].forEach(id => document.getElementById(id)?.classList.remove('active'));
+  if (p==='inventar') {
+    document.getElementById('nav-inv').classList.add('active'); renderInventar();
+  } else if (p==='form') {
+    document.getElementById('nav-neu').classList.add('active'); if (!key) openNewForm();
+  } else if (p==='detail' && key!=null) {
+    document.getElementById('nav-inv').classList.add('active'); renderDetail(key);
+  } else if (p==='favoriten') {
+    document.getElementById('nav-fav').classList.add('active');
+    if (!window._vivinoLoaded) { loadScript('https://www.vivino.com/external/vivino-widgets.js').catch(()=>{}); window._vivinoLoaded=true; }
+    if (favoriten.length===0 && isConnected) loadFavoriten(); else renderFavoriten();
+  } else if (p==='fav-form') {
+    document.getElementById('nav-fav').classList.add('active');
+    if (!key) { editingFavKey=null; document.getElementById('fav-form').reset(); document.getElementById('fav-form-title').textContent='Neuer Favorit'; }
+  }
 }
 
 // ================================================================
@@ -1618,6 +1747,236 @@ function exportSnapshot() {
   const html=`<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>WeinInventar Snapshot ${ts}</title><style>body{font-family:system-ui,sans-serif;max-width:1000px;margin:2rem auto;padding:0 1rem}h1{color:#6b1a2e}.meta{color:#7a6670;font-size:.9rem;margin-bottom:1.5rem}table{width:100%;border-collapse:collapse;font-size:.85rem}th{background:#6b1a2e;color:#fff;padding:.55rem .75rem;text-align:left}td{padding:.45rem .75rem;border-bottom:1px solid #e2d9d0}tr:nth-child(even)td{background:#faf7f4}.badge{display:inline-block;padding:1px 8px;border-radius:20px;font-size:.71rem;font-weight:700;border:1px solid}.weiss{background:#fefce8;color:#854d0e;border-color:#854d0e}.rot{background:#fde8e8;color:#991b1b;border-color:#991b1b}.rosé,.rose{background:#fce7f3;color:#9d174d;border-color:#9d174d}.orange{background:#fff7ed;color:#c2410c;border-color:#c2410c}.sekt{background:#eff6ff;color:#1d4ed8;border-color:#1d4ed8}.stars{color:#c8860a}</style></head><body><h1>🍷 WeinInventar Snapshot</h1><p class="meta">Exportiert am ${now.toLocaleString('de-CH')} · ${wines.length} Weine · Quelle: Google Sheets</p><table><thead><tr><th>Name</th><th>Weingut</th><th>Typ</th><th>Jahrgang</th><th>Appellation</th><th>Alkohol</th><th>Bestand</th><th>Bewertung</th></tr></thead><tbody>${wines.map(w=>`<tr><td><strong>${esc(w.name)}</strong></td><td>${esc(w.weingut)}</td><td><span class="badge ${w.weintyp.toLowerCase()}">${w.weintyp}</span></td><td>${w.jahrgang}</td><td>${w.appellation||'–'}</td><td>${w.alkohol?w.alkohol+'%':'–'}</td><td>${w.bestand}</td><td class="stars">${w.bewertung?'★'.repeat(w.bewertung):'–'}</td></tr>`).join('')}</tbody></table></body></html>`;
   const blob=new Blob([html],{type:'text/html;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`weininventar_${ts}.html`;a.click();URL.revokeObjectURL(url);
   toast('Snapshot heruntergeladen.');
+}
+
+// ================================================================
+// FAVORITEN — Vivino-Integration
+// ================================================================
+const FAV_SHEET = 'Favoriten';
+const FAV_SHEET_ID = 842140154;
+let favoriten = [];
+let editingFavKey = null;
+
+// Favoriten aus Sheet laden
+async function loadFavoriten() {
+  if (!accessToken) return;
+  try {
+    const data = await sheetsGet(`${FAV_SHEET}!A2:M1000`);
+    const rows = data.values || [];
+    favoriten = rows.filter(r => r[0] && r[1]).map((r, idx) => ({
+      rowKey: parseInt(r[0]) || idx+1,
+      sheetRow: idx + 2,
+      name: r[1]||'', weintyp: r[2]||'Rot', jahrgang: r[3]||'',
+      vivinoWineId: r[4]||'', vivinoUrl: r[5]||'',
+      vivinoScore: r[6]||'', meineBewertung: r[7]||'',
+      preis: r[8]||'', status: r[9]||'Favorit',
+      notiz: r[10]||'', inKeller: r[11]||'Nein', updatedAt: r[12]||'',
+    }));
+    if (document.getElementById('page-favoriten').style.display !== 'none') renderFavoriten();
+  } catch(e) { console.warn('Favoriten laden fehlgeschlagen:', e); }
+}
+
+async function saveFavRow(fav) {
+  const row = [[
+    String(fav.rowKey), fav.name, fav.weintyp, String(fav.jahrgang||''),
+    fav.vivinoWineId, fav.vivinoUrl, fav.vivinoScore||'',
+    fav.meineBewertung||'', fav.preis||'', fav.status,
+    fav.notiz||'', fav.inKeller||'Nein', new Date().toISOString().split('T')[0],
+  ]];
+  if (fav.sheetRow) {
+    const range = `${FAV_SHEET}!A${fav.sheetRow}:M${fav.sheetRow}`;
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent(range)}?valueInputOption=RAW`, {
+      method: 'PUT', headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: row }),
+    });
+  } else {
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent(FAV_SHEET)}!A1:M1:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
+    const res = await fetch(url, {
+      method: 'POST', headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: row }),
+    });
+    const d = await res.json();
+    const rm = (d.updates?.updatedRange||'').match(/(\d+)$/);
+    fav.sheetRow = rm ? parseInt(rm[1]) : favoriten.length + 2;
+  }
+}
+
+async function deleteFav(rowKey) {
+  const f = favoriten.find(x => x.rowKey === rowKey);
+  if (!f) return;
+  if (isConnected && f.sheetRow) {
+    const range = `${FAV_SHEET}!A${f.sheetRow}:M${f.sheetRow}`;
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent(range)}:clear`, {
+      method: 'POST', headers: { Authorization: 'Bearer ' + accessToken },
+    });
+  }
+  favoriten = favoriten.filter(x => x.rowKey !== rowKey);
+  renderFavoriten();
+  toast('Favorit entfernt.');
+}
+
+// Vivino-URL parsen
+function parseFavUrl() {
+  const url = gv('ff-url');
+  const m = url.match(/\/de\/([^/]+)\/w\/(\d+)/);
+  if (!m) return;
+  const slug = m[1], wineId = m[2];
+  const yearM = url.match(/\?year=(\d{4})/);
+  document.getElementById('ff-wineid').value = wineId;
+  if (yearM) document.getElementById('ff-jahrgang').value = yearM[1];
+  // Name aus Slug
+  const name = slug.replace(/-v-v\w+$/,'').split('-').map((w,i) => {
+    const stop = ['de','del','di','do','da','du','la','le','les','des','von','van','d','al'];
+    return (i===0||!stop.includes(w)) ? w.charAt(0).toUpperCase()+w.slice(1) : w;
+  }).join(' ');
+  if (!gv('ff-name')) document.getElementById('ff-name').value = name;
+}
+
+// Favoriten rendern
+function renderFavoriten() {
+  const q = (document.getElementById('fav-search')?.value||'').toLowerCase();
+  const st = document.getElementById('fav-filter-status')?.value||'';
+  const typ = document.getElementById('fav-filter-typ')?.value||'';
+  const filtered = favoriten.filter(f => {
+    const mq = !q || f.name.toLowerCase().includes(q);
+    const ms = !st || f.status === st;
+    const mt = !typ || f.weintyp === typ;
+    return mq && ms && mt;
+  });
+
+  const inKeller = favoriten.filter(f => f.inKeller === 'Ja').length;
+  document.getElementById('fav-stats-line').textContent =
+    `${filtered.length} Einträge · ${inKeller} im Keller übernommen`;
+
+  const c = document.getElementById('fav-container');
+  if (!filtered.length) {
+    c.innerHTML = '<div class="empty"><p>Keine Favoriten gefunden.</p></div>';
+    return;
+  }
+
+  const statusColor = {
+    'Favorit':'var(--accent)', 'Wunschliste':'#7a6670',
+    'Beobachten':'#1d4ed8', 'Bereits im Keller':'#16a34a'
+  };
+  const statusIcon = { 'Favorit':'♥', 'Wunschliste':'♡', 'Beobachten':'👁', 'Bereits im Keller':'✔' };
+
+  c.innerHTML = '<div class="wine-list">' + filtered.map(f => {
+    const sc = statusColor[f.status] || 'var(--muted)';
+    const si = statusIcon[f.status] || '●';
+    const bewStr = f.meineBewertung ? `★ ${parseFloat(f.meineBewertung).toFixed(1)}` : '';
+    const vivinoStr = f.vivinoScore ? `Vivino: ${f.vivinoScore}` : '';
+    const preisStr = f.preis ? `CHF ${parseFloat(f.preis).toFixed(2)}` : '';
+    return `<div class="wine-row" style="cursor:default">
+      <div style="width:36px;height:36px;flex-shrink:0;border-radius:50%;background:${sc}22;display:flex;align-items:center;justify-content:center;font-size:1rem;border:1.5px solid ${sc}">${si}</div>
+      <div class="wine-row-info">
+        <div class="wine-row-name">
+          ${esc(f.name)}
+          <span class="badge badge-${f.weintyp.toLowerCase()}" style="vertical-align:middle">${f.weintyp}</span>
+          ${f.inKeller==='Ja'?'<span style="font-size:.7rem;color:#16a34a;margin-left:4px">Im Keller</span>':''}
+        </div>
+        <div class="wine-row-sub">${f.jahrgang||''}${f.jahrgang&&(bewStr||vivinoStr||preisStr)?' · ':''}${bewStr}${bewStr&&vivinoStr?' · ':''}${vivinoStr}${preisStr?' · '+preisStr:''}</div>
+        ${f.notiz?`<div style="font-size:.75rem;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:400px">${esc(f.notiz)}</div>`:''}
+        <div style="margin-top:4px;display:flex;gap:5px;align-items:center;flex-wrap:wrap">
+          <span style="font-size:.7rem;font-weight:700;color:${sc};border:1px solid ${sc};border-radius:4px;padding:1px 6px">${esc(f.status)}</span>
+          ${f.vivinoUrl?`<a href="${esc(f.vivinoUrl)}" target="_blank" style="font-size:.72rem;color:var(--primary);text-decoration:none;border-bottom:1px solid var(--primary)/30">🍷 Vivino</a>`:''}
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0;align-items:flex-end">
+        <button class="btn btn-outline btn-sm" onclick="editFav(${f.rowKey})" style="font-size:.72rem;padding:4px 8px">Bearbeiten</button>
+        ${f.inKeller!=='Ja'?`<button class="btn btn-sm" onclick="inKellerUebernehmen(${f.rowKey})" style="font-size:.72rem;padding:4px 8px;background:var(--primary);color:var(--primary-fg);border:none;border-radius:7px">↓ In Keller</button>`:''}
+        <button class="btn-ghost btn-sm" onclick="if(confirm('Favorit löschen?')) deleteFav(${f.rowKey})" style="font-size:.7rem;color:var(--danger)">Löschen</button>
+      </div>
+    </div>`;
+  }).join('') + '</div>';
+}
+
+// Favorit-Formular
+function editFav(rowKey) {
+  const f = favoriten.find(x => x.rowKey === rowKey);
+  if (!f) return;
+  editingFavKey = rowKey;
+  document.getElementById('fav-form-title').textContent = 'Favorit bearbeiten';
+  document.getElementById('ff-url').value = f.vivinoUrl||'';
+  document.getElementById('ff-wineid').value = f.vivinoWineId||'';
+  document.getElementById('ff-name').value = f.name||'';
+  document.getElementById('ff-weintyp').value = f.weintyp||'Rot';
+  document.getElementById('ff-jahrgang').value = f.jahrgang||'';
+  document.getElementById('ff-status').value = f.status||'Favorit';
+  document.getElementById('ff-bewertung').value = f.meineBewertung||'';
+  document.getElementById('ff-vivino-score').value = f.vivinoScore||'';
+  document.getElementById('ff-preis').value = f.preis||'';
+  document.getElementById('ff-notiz').value = f.notiz||'';
+  document.getElementById('page-favoriten').style.display='none';
+  document.getElementById('page-fav-form').style.display='';
+}
+
+async function submitFavForm(e) {
+  e.preventDefault();
+  const name = gv('ff-name');
+  if (!name) { toast('Name ist Pflicht.','err'); return; }
+
+  const nextKey = editingFavKey || (Math.max(0,...favoriten.map(f=>f.rowKey||0))+1);
+  const fav = {
+    rowKey: nextKey,
+    name, weintyp: gv('ff-weintyp'), jahrgang: gv('ff-jahrgang'),
+    vivinoWineId: gv('ff-wineid'), vivinoUrl: gv('ff-url'),
+    vivinoScore: gv('ff-vivino-score'), meineBewertung: gv('ff-bewertung'),
+    preis: gv('ff-preis'), status: gv('ff-status'),
+    notiz: gv('ff-notiz'), inKeller: 'Nein',
+  };
+
+  if (editingFavKey != null) {
+    const existing = favoriten.find(f => f.rowKey === editingFavKey);
+    fav.sheetRow = existing?.sheetRow;
+    fav.inKeller = existing?.inKeller || 'Nein';
+    const idx = favoriten.findIndex(f => f.rowKey === editingFavKey);
+    if (idx !== -1) favoriten[idx] = fav;
+  } else {
+    favoriten.push(fav);
+  }
+
+  document.getElementById('fav-submit-btn').textContent = 'Speichern…';
+  document.getElementById('fav-submit-btn').disabled = true;
+  try {
+    if (isConnected) await saveFavRow(fav);
+    toast(editingFavKey ? 'Favorit aktualisiert.' : 'Favorit gespeichert.');
+    editingFavKey = null;
+    showPage('favoriten');
+  } catch(err) {
+    toast('Fehler: ' + err.message, 'err');
+  } finally {
+    document.getElementById('fav-submit-btn').textContent = 'Favorit speichern';
+    document.getElementById('fav-submit-btn').disabled = false;
+  }
+}
+
+// In Keller übernehmen
+async function inKellerUebernehmen(rowKey) {
+  const f = favoriten.find(x => x.rowKey === rowKey);
+  if (!f) return;
+
+  // Wein-Objekt vorausfüllen
+  const nextWeinKey = Math.max(0,...wines.map(w=>w.rowKey||0)) + 1;
+  const sig = buildSig(f.name, '', f.jahrgang||new Date().getFullYear(), '75 cl');
+
+  // Zum Neuer-Wein-Formular navigieren mit vorgefüllten Werten
+  showPage('form');
+  setTimeout(() => {
+    document.getElementById('fn').value = f.name;
+    document.getElementById('fwt').value = f.weintyp || 'Rot';
+    if (f.jahrgang) document.getElementById('fjg').value = f.jahrgang;
+    if (f.meineBewertung) setFStar(Math.round(parseFloat(f.meineBewertung)));
+    if (f.notiz) document.getElementById('fno').value = f.notiz;
+    document.getElementById('fno').value = (f.notiz||'') + (f.vivinoUrl ? `\nVivino: ${f.vivinoUrl}` : '');
+    if (f.preis) document.getElementById('fpr').value = f.preis;
+    updSig();
+    toast(`Felder aus Favorit übernommen — bitte Weingut und Füllmenge ergänzen.`);
+  }, 100);
+
+  // Favorit als "Im Keller" markieren
+  f.inKeller = 'Ja';
+  f.status = 'Bereits im Keller';
+  if (isConnected) await saveFavRow(f).catch(() => {});
 }
 
 // ================================================================
