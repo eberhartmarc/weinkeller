@@ -577,8 +577,10 @@ function initGoogleAuth() {
   }
 }
 
+let _tokenClient = null;
+
 function initTokenClient(cid) {
-  const client = google.accounts.oauth2.initTokenClient({
+  _tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: cid,
     scope: 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file',
     callback: (resp) => {
@@ -594,9 +596,24 @@ function initTokenClient(cid) {
     },
   });
 
-  setStatus('loading', 'Warte auf Google-Anmeldung… (Pop-up erlauben!)');
-  // prompt:'select_account' zeigt immer den Dialog, verhindert stilles Scheitern
-  client.requestAccessToken({ prompt: 'select_account' });
+  // Erst still versuchen (kein Prompt) — klappt wenn Token noch gültig
+  // Bei Fehler zeigen wir den Anmelden-Button — User-Klick öffnet Popup zuverlässig
+  setStatus('loading', 'Warte auf Google-Anmeldung…');
+  try {
+    _tokenClient.requestAccessToken({ prompt: '' });
+  } catch(e) {
+    setStatus('err', 'Bitte «Google Anmelden» klicken.');
+  }
+}
+
+function retryAuth() {
+  if (_tokenClient) {
+    // Expliziter User-Klick → Popup darf geöffnet werden
+    setStatus('loading', 'Anmeldung läuft…');
+    _tokenClient.requestAccessToken({ prompt: 'select_account' });
+  } else {
+    initGoogleAuth();
+  }
 }
 
 // ================================================================
@@ -950,6 +967,7 @@ async function setDetailStar(key, val) {
 // ================================================================
 function openNewForm() {
   editingKey=null; fStarVal=null; photoData={v:null,h:null};
+  window._pendingDriveVorne=null; window._pendingDriveHinten=null;
   document.getElementById('form-title').textContent='Neuer Wein';
   document.getElementById('form-sub').textContent='Wein zum Inventar hinzufügen';
   document.getElementById('submit-btn').textContent='Wein speichern';
@@ -1009,8 +1027,9 @@ async function submitForm(e) {
     preis:gv('fpr')||null, einkaufsdatum:gv('fed')||todayStr(),
     bewertung:fStarVal, notizen:gv('fno')||null,
     fotoVorne:photoData.v, fotoHinten:photoData.h,
-    fotoVorneUrl: editingKey ? (wines.find(w=>w.rowKey===editingKey)?.fotoVorneUrl||null) : null,
-    fotoHintenUrl: editingKey ? (wines.find(w=>w.rowKey===editingKey)?.fotoHintenUrl||null) : null,
+    // Drive-URLs: aus OCR-Vorab-Upload oder aus bestehendem Eintrag
+    fotoVorneUrl: window._pendingDriveVorne || (editingKey ? (wines.find(w=>w.rowKey===editingKey)?.fotoVorneUrl||null) : null),
+    fotoHintenUrl: window._pendingDriveHinten || (editingKey ? (wines.find(w=>w.rowKey===editingKey)?.fotoHintenUrl||null) : null),
     weinSignatur:sig, updatedAt:new Date().toISOString(),
   };
 
@@ -1060,6 +1079,9 @@ async function submitForm(e) {
     if (photoData.v) savePhoto(nextKey,'v',photoData.v);
     if (photoData.h) savePhoto(nextKey,'h',photoData.h);
     saveLocal();
+    // Pending Drive-URLs zurücksetzen
+    window._pendingDriveVorne = null;
+    window._pendingDriveHinten = null;
     toast(editingKey?'Änderungen gespeichert':'Wein erfasst: '+name);
     showPage('detail', nextKey);
     editingKey=null;
@@ -1113,6 +1135,18 @@ function setPhotoPreview(side,src) {
 }
 function rmPhoto(side,e) { e.stopPropagation(); photoData[side]=null; document.getElementById('drop-'+side).querySelectorAll('img.prev').forEach(i=>i.remove()); document.getElementById('ocr-'+side+'-btn').style.display='none'; document.getElementById('ocr-'+side+'-out').style.display='none'; document.getElementById('f'+side).value=''; }
 function resetPhoto(side) { photoData[side]=null; document.getElementById('drop-'+side).querySelectorAll('img.prev').forEach(i=>i.remove()); document.getElementById('ocr-'+side+'-btn').style.display='none'; document.getElementById('ocr-'+side+'-out').style.display='none'; const fi=document.getElementById('f'+side); if(fi) fi.value=''; }
+
+// ================================================================
+// HILFSFUNKTIONEN
+// ================================================================
+function loadScript(src) {
+  return new Promise((res, rej) => {
+    if (document.querySelector(`script[src="${src}"]`)) { res(); return; }
+    const s = document.createElement('script');
+    s.src = src; s.onload = res; s.onerror = () => rej(new Error('Script konnte nicht geladen werden: ' + src));
+    document.head.appendChild(s);
+  });
+}
 
 // ================================================================
 // OCR ENGINE v2 — robuste Extraktion mit Erkennungs-Panel
@@ -1363,23 +1397,41 @@ async function doOCR(side) {
   const out = document.getElementById('ocr-'+side+'-out');
   btn.disabled = true;
   btn.innerHTML = '⏳ OCR läuft…';
+
+  // 1) Foto parallel in Drive hochladen (falls verbunden)
+  if (isConnected && src) {
+    const sideLabel = side === 'v' ? 'vorne' : 'hinten';
+    const ts = Date.now();
+    const fname = `foto_${sideLabel}_${ts}.jpg`;
+    btn.innerHTML = '⏳ Lade Foto in Drive…';
+    const driveUrl = await uploadPhotoToDrive(src, fname);
+    if (driveUrl) {
+      if (side === 'v') {
+        // Merke Drive-URL für späteres Speichern
+        window._pendingDriveVorne = driveUrl;
+      } else {
+        window._pendingDriveHinten = driveUrl;
+      }
+      toast(`Foto ${sideLabel} in Google Drive gespeichert ✔`);
+    }
+    btn.innerHTML = '⏳ OCR läuft…';
+  }
+
+  // 2) OCR starten
   try {
     if (typeof Tesseract === 'undefined') {
+      btn.innerHTML = '⏳ Lade OCR-Engine…';
       await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
     }
-    // Mehrere Sprachen für bessere Erkennung europäischer Etiketten
     const { data: { text } } = await Tesseract.recognize(src, 'deu+fra+eng+ita', {
       logger: () => {},
-      tessedit_pageseg_mode: '6', // Uniform block of text
     });
-    // Rohtext anzeigen
     out.textContent = text;
     out.style.display = '';
-    // Strukturierte Extraktion
     const result = parseOCRText(text);
     renderOCRPanel(result, side);
     const found = Object.values(result).filter(d => d.confidence !== 'none').length;
-    toast(`OCR: ${found} Felder erkannt — bitte prüfen und übernehmen.`);
+    toast(`OCR: ${found} Felder erkannt — prüfen und übernehmen.`);
   } catch(err) {
     out.textContent = 'Fehler: ' + err.message;
     out.style.display = '';
@@ -1557,13 +1609,6 @@ function setStatus(type,msg){
   if(signInBtn) signInBtn.style.display=(type==='err'||type==='loading'&&msg.includes('Warte'))?'':'none';
 }
 
-let _authTimeout;
-function retryAuth(){
-  clearTimeout(_authTimeout);
-  const signInBtn=document.getElementById('signin-btn');
-  if(signInBtn) signInBtn.style.display='none';
-  initGoogleAuth();
-}
 function toast(msg,type){const el=document.getElementById('toast');el.textContent=msg;el.className='show'+(type==='err'?' err':'');clearTimeout(window._tt);window._tt=setTimeout(()=>{el.className='';},3200);}
 function toggleTheme(){const d=document.documentElement.classList.toggle('dark');document.getElementById('theme-icon').textContent=d?'☀️':'🌙';document.getElementById('theme-lbl').textContent=d?'Hellmodus':'Dunkelmodus';try{localStorage.setItem('wk-theme',d?'dark':'light');}catch(e){}}
 
