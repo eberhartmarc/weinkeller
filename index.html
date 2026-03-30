@@ -1115,28 +1115,6 @@ function rmPhoto(side,e) { e.stopPropagation(); photoData[side]=null; document.g
 function resetPhoto(side) { photoData[side]=null; document.getElementById('drop-'+side).querySelectorAll('img.prev').forEach(i=>i.remove()); document.getElementById('ocr-'+side+'-btn').style.display='none'; document.getElementById('ocr-'+side+'-out').style.display='none'; const fi=document.getElementById('f'+side); if(fi) fi.value=''; }
 
 // ================================================================
-// OCR
-// ================================================================
-async function doOCR(side) {
-  const src=photoData[side]; if(!src) { toast('Kein Foto.','err'); return; }
-  const btn=document.getElementById('ocr-'+side+'-btn');
-  const out=document.getElementById('ocr-'+side+'-out');
-  btn.disabled=true; btn.textContent='⏳ Läuft…';
-  try {
-    if (typeof Tesseract==='undefined') await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
-    const {data:{text}}=await Tesseract.recognize(src,'deu+eng',{logger:()=>{}});
-    out.textContent=text; out.style.display='';
-    const ym=text.match(/\b(19|20)\d{2}\b/); if(ym){document.getElementById('fjg').value=ym[0];updSig();}
-    const am=text.match(/(\d{1,2}[.,]\d)\s*%\s*[Vv]ol/); if(am) document.getElementById('fal').value=am[1].replace(',','.');
-    const cm=text.match(/(\d+)\s*cl/i); const mm=text.match(/(\d+)\s*ml/i);
-    if(cm){document.getElementById('ffm').value=cm[1]+' cl';updSig();}else if(mm){document.getElementById('ffm').value=Math.round(parseInt(mm[1])/10)+' cl';updSig();}
-    toast('OCR fertig — bitte Felder prüfen.');
-  } catch(err) { out.textContent='Fehler: '+err.message; out.style.display=''; toast('OCR fehlgeschlagen.','err'); }
-  finally { btn.disabled=false; btn.textContent=side==='v'?'🔍 OCR Vorne':'🔍 OCR Hinten'; }
-}
-function loadScript(src) { return new Promise((res,rej)=>{ const s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=rej; document.head.appendChild(s); }); }
-
-// ================================================================
 // OCR ENGINE v2 — robuste Extraktion mit Erkennungs-Panel
 // ================================================================
 
@@ -1341,11 +1319,8 @@ function renderOCRPanel(result, side) {
     </button>`;
   }
   html += '</div>';
-  html += '<button type="button" onclick="applyAllOCR('+JSON.stringify(result)+')"
-    style="margin-top:8px;width:100%;padding:7px;background:var(--primary);color:var(--primary-fg);
-           border:none;border-radius:8px;font-weight:700;font-size:.82rem;cursor:pointer">
-    ⬇️ Alle übernehmen
-  </button>';
+  const allBtn = '<button type="button" onclick="applyAllOCR(' + JSON.stringify(result).replace(/"/g,'&quot;') + ')" style="margin-top:8px;width:100%;padding:7px;background:var(--primary);color:var(--primary-fg);border:none;border-radius:8px;font-weight:700;font-size:.82rem;cursor:pointer">⬇️ Alle übernehmen</button>';
+  html += allBtn;
 
   existing.innerHTML = html;
   existing.style.display = '';
