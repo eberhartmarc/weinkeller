@@ -317,35 +317,59 @@ const SHEET_NAME = 'Tabellenblatt1';
 
     <!-- CONFIG PANEL -->
     <div id="config-panel">
-      <h2>Einstellungen</h2>
-      <div class="config-fields">
-        <div class="fgroup">
-          <label>Google OAuth Client-ID</label>
-          <input type="text" id="cfg-client-id" placeholder="xxxx.apps.googleusercontent.com">
+      <h2 style="font-size:1rem;font-weight:700;margin-bottom:14px">⚙️ Einstellungen</h2>
+
+      <!-- ABSCHNITT 1: Google-Verbindung -->
+      <div style="margin-bottom:18px">
+        <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:8px;padding-bottom:5px;border-bottom:1px solid var(--border)">Google-Verbindung</div>
+        <div class="config-fields">
+          <div class="fgroup">
+            <label>OAuth Client-ID</label>
+            <input type="text" id="cfg-client-id" placeholder="xxxx.apps.googleusercontent.com" style="font-size:.78rem;font-family:monospace">
+          </div>
+          <div class="fgroup">
+            <label>Spreadsheet-ID</label>
+            <input type="text" id="cfg-sheet-id" value="1l0p0ce5wicnw9Oa_55MwuFLpbPqBuLsZlQ32fPDpJa0" readonly style="font-family:monospace;font-size:.78rem;opacity:.6">
+          </div>
         </div>
-        <div class="fgroup">
-          <label>Spreadsheet-ID (bereits gesetzt)</label>
-          <input type="text" id="cfg-sheet-id" value="1l0p0ce5wicnw9Oa_55MwuFLpbPqBuLsZlQ32fPDpJa0" readonly style="font-family:monospace;font-size:.78rem;">
+        <div style="margin-top:8px;display:flex;gap:7px;flex-wrap:wrap">
+          <button class="btn btn-primary btn-sm" onclick="saveConfig()">✔ Speichern &amp; verbinden</button>
+          <a href="https://docs.google.com/spreadsheets/d/1l0p0ce5wicnw9Oa_55MwuFLpbPqBuLsZlQ32fPDpJa0/edit" target="_blank" class="btn btn-outline btn-sm">📊 Sheet öffnen</a>
+          <button class="btn btn-outline btn-sm" onclick="exportSnapshot()">⬇️ Snapshot-HTML</button>
         </div>
       </div>
-      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-primary btn-sm" onclick="saveConfig()">Speichern & verbinden</button>
-        <a href="https://docs.google.com/spreadsheets/d/1l0p0ce5wicnw9Oa_55MwuFLpbPqBuLsZlQ32fPDpJa0/edit" target="_blank" class="btn btn-outline btn-sm">
-          <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-          Sheet öffnen
-        </a>
-        <button class="btn btn-outline btn-sm" onclick="exportSnapshot()">
-          <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          Snapshot-HTML
-        </button>
+
+      <!-- ABSCHNITT 2: Gemini API für Preissuche -->
+      <div style="margin-bottom:18px">
+        <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:8px;padding-bottom:5px;border-bottom:1px solid var(--border)">🤖 Gemini API — Preissuche</div>
+        <div class="fgroup" style="margin-bottom:8px">
+          <label>Gemini API Key</label>
+          <div style="display:flex;gap:6px">
+            <input type="password" id="cfg-gemini-key" placeholder="AIzaSy…" style="font-family:monospace;font-size:.78rem;flex:1">
+            <button class="btn btn-outline btn-sm" onclick="toggleGeminiKeyVisibility()" id="gemini-eye-btn" style="flex-shrink:0">👁</button>
+          </div>
+        </div>
+        <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:8px">
+          <button class="btn btn-primary btn-sm" onclick="saveGeminiKey()">✔ API Key speichern</button>
+          <button class="btn btn-outline btn-sm" id="gemini-test-btn" onclick="testGeminiKey()">🔍 Verbindung testen</button>
+        </div>
+        <div id="gemini-status" style="font-size:.78rem;padding:6px 10px;border-radius:6px;display:none"></div>
+        <div style="font-size:.75rem;color:var(--muted);line-height:1.6;margin-top:8px;background:var(--bg);border-radius:7px;padding:9px 12px">
+          <strong style="color:var(--text)">Einrichtung (2 Minuten):</strong><br>
+          1. <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--primary)">aistudio.google.com/app/apikey</a> öffnen<br>
+          2. <strong>«Create API key»</strong> klicken → Projekt «WeinKeller» wählen<br>
+          3. Key kopieren und oben eintragen → Speichern<br>
+          <span style="color:#16a34a">Kostenlos bis 15 Anfragen/Min (mehr als genügend)</span>
+        </div>
       </div>
-      <div style="margin-top:12px;background:var(--bg);border-radius:8px;padding:11px 14px;font-size:.78rem;line-height:1.7;color:var(--muted);">
-        <strong style="color:var(--text)">📋 Einmalige Einrichtung (5 Min.):</strong><br>
-        1. <a href="https://console.cloud.google.com/" target="_blank" style="color:var(--primary)">Google Cloud Console</a> öffnen<br>
-        2. Neues Projekt → <strong>APIs &amp; Dienste → Bibliothek → "Google Sheets API" aktivieren</strong><br>
-        3. Anmeldedaten → OAuth 2.0-Client-ID → Webanwendung<br>
-        4. Autorisierte JS-Quellen: <code style="background:var(--border);padding:1px 5px;border-radius:4px">null</code> hinzufügen (für lokale HTML-Datei)<br>
-        ✅ Client-ID ist bereits eingetragen — nur noch Schritt 4 nötig!
+
+      <!-- ABSCHNITT 3: Vivino -->
+      <div>
+        <div style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:8px;padding-bottom:5px;border-bottom:1px solid var(--border)">🍷 Vivino</div>
+        <div style="font-size:.8rem;color:var(--muted);line-height:1.6">
+          Profil: <a href="https://www.vivino.com/users/marc_eber" target="_blank" style="color:var(--primary)">marc_eber</a><br>
+          Favoriten direkt auf Vivino &rarr; Link kopieren &rarr; «Neuer Favorit» in WeinKeller
+        </div>
       </div>
     </div>
 
@@ -661,6 +685,146 @@ function saveConfig() {
   localStorage.setItem('wk-client-id', cid);
   toast('Gespeichert — verbinde…');
   initGoogleAuth();
+}
+
+// ----------------------------------------------------------------
+// GEMINI API KEY VERWALTUNG
+// ----------------------------------------------------------------
+function getGeminiKey() {
+  try { return localStorage.getItem('wk-gemini-key') || ''; } catch(e) { return ''; }
+}
+
+function saveGeminiKey() {
+  const key = document.getElementById('cfg-gemini-key').value.trim();
+  if (!key) { toast('API Key ist leer.', 'err'); return; }
+  try { localStorage.setItem('wk-gemini-key', key); } catch(e) {}
+  toast('✔ Gemini API Key gespeichert.');
+  showGeminiStatus('ok', '✅ Key gespeichert — Verbindung noch nicht getestet.');
+}
+
+function toggleGeminiKeyVisibility() {
+  const inp = document.getElementById('cfg-gemini-key');
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+}
+
+function showGeminiStatus(type, msg) {
+  const el = document.getElementById('gemini-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.display = '';
+  el.style.background = type === 'ok' ? '#dcfce7' : type === 'err' ? '#fee2e2' : '#fef9c3';
+  el.style.color = type === 'ok' ? '#166534' : type === 'err' ? '#991b1b' : '#854d0e';
+}
+
+async function testGeminiKey() {
+  const key = getGeminiKey() || document.getElementById('cfg-gemini-key').value.trim();
+  if (!key) { showGeminiStatus('err', '❌ Bitte zuerst API Key eingeben und speichern.'); return; }
+  const btn = document.getElementById('gemini-test-btn');
+  btn.disabled = true; btn.textContent = '⏳ Teste…';
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: 'Antworte nur mit: OK' }] }] }) }
+    );
+    const d = await res.json();
+    if (d.candidates?.[0]?.content) {
+      showGeminiStatus('ok', '✅ Verbindung erfolgreich — Gemini API ist bereit.');
+    } else {
+      showGeminiStatus('err', '❌ Fehler: ' + (d.error?.message || JSON.stringify(d)));
+    }
+  } catch(e) {
+    showGeminiStatus('err', '❌ Netzwerkfehler: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = '🔍 Verbindung testen';
+  }
+}
+
+// ----------------------------------------------------------------
+// GEMINI PREISSUCHE
+// ----------------------------------------------------------------
+async function searchPriceWithGemini(fav) {
+  const key = getGeminiKey();
+  if (!key) {
+    toast('⚠️ Bitte zuerst Gemini API Key in Einstellungen eintragen.', 'err');
+    toggleConfig();
+    return null;
+  }
+
+  const jahrgang = fav.jahrgang ? ` ${fav.jahrgang}` : '';
+  const prompt = `Du bist ein Weinexperte. Suche den aktuellen Detailhandelspreis für diesen Wein in der Schweiz:
+
+Wein: ${fav.name}${jahrgang}
+Weintyp: ${fav.weintyp}
+
+Bitte antworte im folgenden JSON-Format (nichts anderes, kein Markdown):
+{
+  "preis_chf": 24.50,
+  "preis_range": "22–28",
+  "quelle": "z.B. Denner, Flaschenpost.ch",
+  "verfuegbar_in_ch": true,
+  "hinweis": "kurzer Kommentar falls nötig"
+}
+
+Wenn kein Preis bekannt ist, setze preis_chf auf null.`;
+
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) }
+    );
+    const d = await res.json();
+    if (d.error) throw new Error(d.error.message);
+    const raw = d.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+    // JSON aus Antwort extrahieren
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('Kein JSON in Antwort');
+    return JSON.parse(jsonMatch[0]);
+  } catch(e) {
+    toast('Gemini Fehler: ' + e.message, 'err');
+    return null;
+  }
+}
+
+// Preis-Button für Favoritenkarte
+async function favSearchPrice(rowKey) {
+  const f = favoriten.find(x => x.rowKey === rowKey);
+  if (!f) return;
+  const btn = document.getElementById('price-btn-' + rowKey);
+  const resultDiv = document.getElementById('price-result-' + rowKey);
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Suche…'; }
+
+  const result = await searchPriceWithGemini(f);
+
+  if (btn) { btn.disabled = false; btn.textContent = '💰 Preis suchen'; }
+  if (!result) return;
+
+  const preis = result.preis_chf;
+  const range = result.preis_range;
+  const quelle = result.quelle || '';
+  const hinweis = result.hinweis || '';
+
+  if (resultDiv) {
+    resultDiv.style.display = '';
+    resultDiv.innerHTML = preis
+      ? `<div style="background:var(--bg);border:1px solid var(--border);border-radius:7px;padding:8px 11px;font-size:.8rem">
+          <div><strong>CHF ${preis.toFixed(2)}</strong>${range ? ` (Spanne: CHF ${range})`:''}</div>
+          ${quelle ? `<div style="color:var(--muted);margin-top:2px">🔗 ${esc(quelle)}</div>`:''}
+          ${hinweis ? `<div style="color:var(--muted);font-size:.75rem;margin-top:2px">${esc(hinweis)}</div>`:''}
+          <button onclick="applyFavPrice(${rowKey},${preis})" class="btn btn-primary btn-sm" style="margin-top:7px;font-size:.75rem">✔ Preis übernehmen (CHF ${preis.toFixed(2)})</button>
+         </div>`
+      : `<div style="font-size:.78rem;color:var(--muted);padding:6px">ℹ️ Kein Preis gefunden${hinweis?' — '+esc(hinweis):''}.</div>`;
+  }
+}
+
+async function applyFavPrice(rowKey, preis) {
+  const f = favoriten.find(x => x.rowKey === rowKey);
+  if (!f) return;
+  f.preis = preis.toFixed(2);
+  if (isConnected) await saveFavRow(f).catch(()=>{});
+  renderFavoriten();
+  toast(`Preis CHF ${preis.toFixed(2)} gespeichert.`);
 }
 
 function toggleConfig() {
@@ -1887,10 +2051,12 @@ function renderFavoriten() {
       </div>
       <div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0;align-items:flex-end">
         <button class="btn btn-outline btn-sm" onclick="editFav(${f.rowKey})" style="font-size:.72rem;padding:4px 8px">Bearbeiten</button>
+        <button class="btn btn-outline btn-sm" id="price-btn-${f.rowKey}" onclick="favSearchPrice(${f.rowKey})" style="font-size:.72rem;padding:4px 8px;color:var(--accent);border-color:var(--accent)">💰 Preis suchen</button>
         ${f.inKeller!=='Ja'?`<button class="btn btn-sm" onclick="inKellerUebernehmen(${f.rowKey})" style="font-size:.72rem;padding:4px 8px;background:var(--primary);color:var(--primary-fg);border:none;border-radius:7px">↓ In Keller</button>`:''}
         <button class="btn-ghost btn-sm" onclick="if(confirm('Favorit löschen?')) deleteFav(${f.rowKey})" style="font-size:.7rem;color:var(--danger)">Löschen</button>
       </div>
-    </div>`;
+    </div>
+    <div id="price-result-${f.rowKey}" style="display:none;padding:0 8px 8px"></div>`;
   }).join('') + '</div>';
 }
 
@@ -1993,9 +2159,11 @@ async function inKellerUebernehmen(rowKey) {
   if(dark)document.documentElement.classList.add('dark');
   document.getElementById('theme-icon').textContent=dark?'☀️':'🌙';
   document.getElementById('theme-lbl').textContent=dark?'Hellmodus':'Dunkelmodus';
-  // Config-Feld vorausfüllen
+  // Config-Felder vorausfüllen
   const cid=getClientId();
   if(cid)document.getElementById('cfg-client-id').value=cid;
+  const gkey=getGeminiKey();
+  if(gkey)document.getElementById('cfg-gemini-key').value=gkey;
   // Auth starten
   initGoogleAuth();
 })();
