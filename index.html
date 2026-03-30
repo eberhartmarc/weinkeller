@@ -1654,7 +1654,33 @@ async function confirmDel() {
     try { await sheetsClear(w.sheetRow); } catch(e) { toast('Lösch-Fehler: '+e.message,'err'); }
   }
   wines=wines.filter(x=>x.rowKey!==delTarget);
-  saveLocal(); closeDel(); toast('Wein gelöscht.'); showPage('inventar');
+  saveLocal();
+
+  // Passenden Favoriten zurücksetzen falls vorhanden
+  if (w) await resetFavoritIfLinked(w);
+
+  closeDel(); toast('Wein gelöscht.'); showPage('inventar');
+}
+
+// Favoriten-Link zurücksetzen wenn Wein aus Inventar entfernt wird
+async function resetFavoritIfLinked(wein) {
+  // Suche Favorit der zum gleichen Wein gehört
+  // Vergleich: Name + Jahrgang (weinSignatur enthält Weingut, das in Fav möglicherweise abweicht)
+  const match = favoriten.find(f =>
+    f.inKeller === 'Ja' && (
+      // Exakter Match via weinSignatur falls gespeichert
+      f.notiz?.includes(wein.weinSignatur) ||
+      // Oder Name + Jahrgang übereinstimmend
+      (f.name.toLowerCase() === wein.name.toLowerCase() &&
+       String(f.jahrgang) === String(wein.jahrgang))
+    )
+  );
+  if (!match) return;
+
+  match.inKeller = 'Nein';
+  match.status = 'Favorit';
+  if (isConnected) await saveFavRow(match).catch(()=>{});
+  toast(`Favorit «${match.name}» wieder auf «Favorit» zurückgesetzt.`);
 }
 
 // ================================================================
