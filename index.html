@@ -392,9 +392,16 @@ const SHEET_NAME = 'Tabellenblatt1';
       </div>
       <div class="filters">
         <input type="search" id="s-input" placeholder="🔍 Name, Weingut, Region…" oninput="renderInventar()" style="max-width:220px">
-        <select id="f-typ" onchange="renderInventar()">
+        <select id="f-typ" onchange="renderInventar()" style="max-width:140px;width:auto">
           <option value="">Alle Typen</option>
           <option>Weiss</option><option>Rot</option><option>Rosé</option><option>Orange</option><option>Sekt</option>
+        </select>
+        <select id="f-trinkreif" onchange="renderInventar()" style="max-width:150px;width:auto">
+          <option value="">Trinkreif: alle</option>
+          <option value="jetzt">Jetzt trinkbar</option>
+          <option value="bald">Bald trinkbar (≤5 J.)</option>
+          <option value="lager">Noch lagern</option>
+          <option value="ueberfaellig">Überfällig</option>
         </select>
         <div class="view-toggle">
           <button id="vg-btn" onclick="setView('grid')" title="Raster">
@@ -430,7 +437,7 @@ const SHEET_NAME = 'Tabellenblatt1';
                 <button type="button" class="rm-ph" onclick="rmPhoto('v',event)">✕</button>
                 <input type="file" id="fv" accept="image/*" capture="environment" onchange="handlePhoto('v',this)" style="display:none">
               </div>
-              <button type="button" class="btn btn-outline btn-sm ocr-btn" id="ocr-v-btn" onclick="doOCR('v')" style="display:none">🔍 OCR Vorne</button>
+              <div id="ocr-v-status" style="display:none;font-size:.75rem;padding:4px 6px;border-radius:6px;margin-top:4px"></div>
               <div id="ocr-v-out" class="ocr-out" style="display:none"></div>
             </div>
             <div class="photo-box">
@@ -441,11 +448,21 @@ const SHEET_NAME = 'Tabellenblatt1';
                 <button type="button" class="rm-ph" onclick="rmPhoto('h',event)">✕</button>
                 <input type="file" id="fh" accept="image/*" capture="environment" onchange="handlePhoto('h',this)" style="display:none">
               </div>
-              <button type="button" class="btn btn-outline btn-sm ocr-btn" id="ocr-h-btn" onclick="doOCR('h')" style="display:none">🔍 OCR Hinten</button>
+              <div id="ocr-h-status" style="display:none;font-size:.75rem;padding:4px 6px;border-radius:6px;margin-top:4px"></div>
               <div id="ocr-h-out" class="ocr-out" style="display:none"></div>
             </div>
           </div>
-          <p style="font-size:.75rem;color:#16a34a;margin-top:8px">✅ Fotos werden in Google Drive gespeichert (beim OCR-Klick) und lokal gecacht.</p>
+          <p style="font-size:.75rem;color:#16a34a;margin-top:8px">✅ Foto hochladen startet automatisch OCR + KI-Prüfung + Drive-Upload.</p>
+          <!-- OCR-Ergebnisse Panel (erscheint nach Analyse) -->
+          <div id="ocr-results-panel" style="display:none;margin-top:12px;background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:12px">
+            <div style="font-weight:700;font-size:.85rem;margin-bottom:8px">🤖 Erkannte Felder — bitte prüfen:</div>
+            <div id="ocr-fields-draft" style="margin-bottom:8px"></div>
+            <div id="ocr-fields-final" style="display:none"></div>
+            <div id="ocr-gemini-status" style="font-size:.75rem;color:var(--muted);margin-bottom:8px"></div>
+            <button type="button" id="ocr-apply-btn" onclick="applyOCRFinal()" class="btn btn-primary btn-sm" style="display:none">
+              ✔️ Einträge übernehmen
+            </button>
+          </div>
         </div>
 
         <div class="form-section">
@@ -660,6 +677,19 @@ const SHEET_NAME = 'Tabellenblatt1';
   </main>
 </div>
 
+<!-- Bestand=0 Dialog -->
+<div id="bestand0-dialog" class="dialog-back" style="display:none">
+  <div class="dialog">
+    <h2>Bestand aufgebraucht</h2>
+    <p id="bestand0-dialog-text"></p>
+    <div class="dialog-acts" style="flex-wrap:wrap;gap:7px">
+      <button class="btn btn-primary btn-sm" onclick="bestand0AsFavorit()">♥ Als Favorit weitergeführen</button>
+      <button class="btn btn-outline btn-sm" style="color:var(--danger);border-color:var(--danger)" onclick="bestand0Loeschen()">Löschen</button>
+      <button class="btn btn-ghost btn-sm" onclick="bestand0Behalten()">Behalten (Bestand 0)</button>
+    </div>
+  </div>
+</div>
+
 <!-- Toast & Delete Dialog -->
 <div id="toast"></div>
 <div id="del-dialog" class="dialog-back" style="display:none">
@@ -767,6 +797,175 @@ async function testGeminiKey() {
   }
 }
 
+// ================================================================
+// OCR ENGINE v3 — zweistufig: Tesseract (Draft) → Gemini (Final)
+// ================================================================
+const OCR_LANGS = 'deu+fra+eng+ita+spa+por+nld+cat+slo+ces+hun+ron+hrv+slk+bul';
+// 15 Sprachen: Deutsch, Französisch, Englisch, Italienisch, Spanisch,
+// Portugiesisch, Niederländisch, Katalanisch, Slowenisch, Tschechisch,
+// Ungarisch, Rumänisch, Kroatisch, Slowakisch, Bulgarisch
+
+let _ocrDraftResult = null; // Draft-Ergebnis (Tesseract)
+let _ocrFinalResult = null; // Finales Ergebnis (Gemini-geprüft)
+
+// Hauptfunktion: wird automatisch nach Foto-Upload aufgerufen
+async function doOCR(side) {
+  const src = photoData[side];
+  if (!src) return;
+
+  const statusEl = document.getElementById('ocr-'+side+'-status');
+  const outEl = document.getElementById('ocr-'+side+'-out');
+  const panel = document.getElementById('ocr-results-panel');
+  const draftDiv = document.getElementById('ocr-fields-draft');
+  const finalDiv = document.getElementById('ocr-fields-final');
+  const geminiStatus = document.getElementById('ocr-gemini-status');
+  const applyBtn = document.getElementById('ocr-apply-btn');
+  const isDark = document.documentElement.classList.contains('dark');
+
+  // Farben für Draft vs. Final je nach Modus
+  const draftColor = isDark ? '#6b5040' : '#c8a880';  // gedimmt
+  const finalColor = isDark ? '#e8d5b8' : '#3a1a0a';  // klar lesbar
+
+  // Step 1: Drive-Upload + OCR
+  if (statusEl) { statusEl.textContent = '⏳ Hochladen + OCR…'; statusEl.style.display=''; statusEl.style.background='var(--muted)/20'; statusEl.style.color='var(--muted)'; }
+
+  if (isConnected && src) {
+    const sideLabel = side==='v'?'vorne':'hinten';
+    const url = await uploadPhotoToDrive(src, `foto_${sideLabel}_${Date.now()}.jpg`);
+    if (url) { if(side==='v') window._pendingDriveVorne=url; else window._pendingDriveHinten=url; }
+  }
+
+  try {
+    if (typeof Tesseract==='undefined') {
+      if(statusEl) statusEl.textContent='⏳ Lade OCR-Engine…';
+      await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
+    }
+    if(statusEl) statusEl.textContent='⏳ Texterkennung…';
+    const { data: { text } } = await Tesseract.recognize(src, OCR_LANGS, { logger:()=>{} });
+
+    // Draft-Ergebnis (Tesseract)
+    _ocrDraftResult = parseOCRText(text);
+    outEl.textContent = text; outEl.style.display='';
+
+    // Draft anzeigen (gedimmt)
+    panel.style.display='';
+    draftDiv.innerHTML = renderOCRFieldList(_ocrDraftResult, draftColor, 'Draft (OCR)');
+    finalDiv.style.display='none';
+    geminiStatus.textContent='⏳ Gemini prüft und verbessert…';
+    applyBtn.style.display='none';
+    if(statusEl) { statusEl.textContent='⏳ KI-Prüfung…'; }
+
+    // Step 2: Automatisch Gemini zur Plausibilisierung
+    const key = getGeminiKey();
+    if (key) {
+      const geminiResult = await geminiValidateOCR(text, _ocrDraftResult);
+      if (geminiResult) {
+        _ocrFinalResult = geminiResult;
+        finalDiv.innerHTML = renderOCRFieldList(geminiResult, finalColor, 'KI-geprüft ✅');
+        finalDiv.style.display='';
+        draftDiv.style.display='none'; // Draft durch Final ersetzen
+        geminiStatus.textContent='✅ Gemini hat die Erkennungen geprüft und optimiert.';
+        if(statusEl) { statusEl.textContent='✅ Fertig'; statusEl.style.color='#16a34a'; }
+      } else {
+        // Gemini nicht verfügbar → Draft-Ergebnis als Final verwenden
+        _ocrFinalResult = _ocrDraftResult;
+        geminiStatus.textContent='⚠️ Gemini nicht verfügbar — OCR-Ergebnis direkt.';
+        if(statusEl) { statusEl.textContent='✅ OCR fertig (ohne KI)'; }
+      }
+    } else {
+      _ocrFinalResult = _ocrDraftResult;
+      geminiStatus.textContent='💡 Kein Gemini-Key — OCR-Ergebnis direkt verwenden.';
+      if(statusEl) { statusEl.textContent='✅ OCR fertig'; }
+    }
+    applyBtn.style.display='';
+  } catch(e) {
+    if(statusEl) { statusEl.textContent='❌ Fehler: '+e.message; statusEl.style.color='var(--danger)'; }
+    toast('OCR fehlgeschlagen: '+e.message,'err');
+  }
+}
+
+// Rendert eine Liste erkannter Felder als HTML
+function renderOCRFieldList(result, color, label) {
+  const fieldMap = { jahrgang:'Jahrgang', alkohol:'Alkohol', fuellmenge:'Füllmenge',
+    preis:'Preis', land:'Land', region:'Region', appellation:'Appellation',
+    name:'Name', weingut:'Weingut' };
+  const found = Object.entries(result).filter(([,d])=>d.confidence!=='none'&&d.value);
+  if (!found.length) return `<span style="color:${color};font-size:.78rem">Keine Felder erkannt.</span>`;
+  return `<div style="font-size:.72rem;font-weight:700;color:${color};margin-bottom:4px">${label}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:4px">`+
+    found.map(([key,d])=>`<span style="border:1.5px solid ${color};border-radius:5px;padding:2px 8px;font-size:.78rem;color:${color}">${fieldMap[key]||key}: <strong>${esc(String(d.value))}</strong></span>`).join('')
+  +'</div>';
+}
+
+// Gemini validiert und verbessert OCR-Ergebnis
+async function geminiValidateOCR(rawText, draftResult) {
+  const key = getGeminiKey();
+  if (!key) return null;
+  const prompt = `Du bist ein Weinexperte. Analysiere diesen OCR-Text eines Weins und extrahiere alle möglichen Informationen:
+
+OCR-Text:
+${rawText}
+
+Vorherige Erkennung (zur Plausibilisierung):
+Jahrgang: ${draftResult.jahrgang?.value||'?'}, Alkohol: ${draftResult.alkohol?.value||'?'}, Füllmenge: ${draftResult.fuellmenge?.value||'?'}
+
+Antworte NUR mit diesem JSON:
+{
+  "jahrgang":  {"value": 2019, "confidence": "high"},
+  "alkohol":   {"value": 13.5, "confidence": "high"},
+  "fuellmenge":{"value": "75 cl", "confidence": "high"},
+  "preis":     {"value": null, "confidence": "none"},
+  "land":      {"value": "Schweiz", "confidence": "mid"},
+  "region":    {"value": "Wallis", "confidence": "mid"},
+  "appellation":{"value": "Valais AOC", "confidence": "mid"},
+  "name":      {"value": "Marnin Rouge", "confidence": "low"},
+  "weingut":   {"value": "Andreywein AG", "confidence": "low"}
+}
+Wenn ein Wert nicht erkennbar ist, setze value: null und confidence: "none".
+Korrigiere offensichtliche OCR-Fehler (z.B. 'l3.5%' -> 13.5).`;
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`,
+      { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ contents:[{ parts:[{ text:prompt }] }] }) }
+    );
+    const d = await res.json();
+    if (d.error) return null;
+    const raw = d.candidates?.[0]?.content?.parts?.[0]?.text||'{}';
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (!m) return null;
+    return JSON.parse(m[0]);
+  } catch(e) { return null; }
+}
+
+// Button "Einträge übernehmen" — wendet finale Erkennungen auf Formularfelder an
+function applyOCRFinal() {
+  const result = _ocrFinalResult || _ocrDraftResult;
+  if (!result) return;
+  const fieldMap = {
+    jahrgang:'fjg', alkohol:'fal', fuellmenge:'ffm', preis:'fpr',
+    land:'fla', region:'frg', appellation:'fap', name:'fn', weingut:'fwg',
+  };
+  const isDark = document.documentElement.classList.contains('dark');
+  const finalColor = isDark ? '#e8d5b8' : '#3a1a0a';
+  let applied = 0;
+  for (const [key2, fieldId] of Object.entries(fieldMap)) {
+    const data = result[key2];
+    if (!data || data.confidence==='none' || !data.value) continue;
+    const el = document.getElementById(fieldId);
+    if (!el || el.value.trim()) continue; // Nicht überschreiben
+    el.value = data.value;
+    el.style.color = finalColor;
+    el.style.fontWeight = '600';
+    setTimeout(()=>{ el.style.color=''; el.style.fontWeight=''; }, 3000);
+    applied++;
+  }
+  updSig();
+  document.getElementById('ocr-apply-btn').textContent = `✔️ ${applied} Felder übernommen`;
+  document.getElementById('ocr-apply-btn').disabled = true;
+  toast(`${applied} Felder übernommen.`);
+}
+
 // ----------------------------------------------------------------
 // GEMINI PREISSUCHE — Kernfunktion mit Jahrgangs-Fallback
 // ----------------------------------------------------------------
@@ -778,27 +977,35 @@ async function geminiPriceQuery(name, weintyp, jahrgang) {
     return null;
   }
   const jgStr = jahrgang ? ` ${jahrgang}` : '';
-  const prompt = `Du bist ein Weinexperte. Suche den aktuellen Detailhandelspreis für diesen Wein in der Schweiz:
+  const prompt = `Du bist ein Weinexperte mit Zugang zum Internet. Suche jetzt LIVE den aktuellen Verkaufspreis für diesen Wein in der Schweiz:
 
 Wein: ${name}${jgStr}
 Weintyp: ${weintyp}
 
-Bitte antworte im folgenden JSON-Format (nichts anderes, kein Markdown):
+Suche bitte auf Schweizer Weinhändler-Websites wie Flaschenpost.ch, Bindella.ch, Coop.ch, Denner.ch, Vivino.ch, Galaxus.ch, Vinothek.ch oder ähnlichen.
+
+Antworte NUR mit diesem JSON (kein Markdown):
 {
   "preis_chf": 24.50,
   "preis_range": "22-28",
   "jahrgang_gefunden": 2019,
-  "quelle": "z.B. Denner, Flaschenpost.ch",
-  "hinweis": "kurzer Kommentar falls nötig"
+  "quelle": "Flaschenpost.ch",
+  "quelle_url": "https://...",
+  "hinweis": "kurzer Kommentar"
 }
 
-Wenn kein Preis für diesen Jahrgang bekannt ist, versuche einen ähnlichen Jahrgang und schreibe ihn in jahrgang_gefunden.
-Wenn wirklich kein Preis ermittelt werden kann, setze preis_chf auf null.`;
+Wenn kein Preis für diesen Jahrgang gefunden, versuche einen ähnlichen und schreibe ihn in jahrgang_gefunden.
+Wenn gar kein Preis findbar: preis_chf auf null.`;
 
+  // Mit Google Search Grounding für Live-Preise
+  const payload = {
+    contents: [{ parts: [{ text: prompt }] }],
+    tools: [{ google_search: {} }]  // Web-Grounding aktiviert
+  };
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`,
     { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) }
+      body: JSON.stringify(payload) }
   );
   const d = await res.json();
   if (d.error) throw new Error(d.error.message);
@@ -1111,7 +1318,7 @@ let _tokenClient = null;
 function initTokenClient(cid) {
   _tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: cid,
-    scope: 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file',
+    scope: 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly',
     callback: (resp) => {
       if (resp.error) {
         setStatus('err', '❌ Anmeldung fehlgeschlagen: ' + resp.error);
@@ -1306,6 +1513,7 @@ async function savePhoto(key, side, data) {
 
 async function loadLocalPhotos() {
   const db = await openIDB();
+  const driveLoadPromises = [];
   for (const w of wines) {
     await new Promise(res => {
       const tx = db.transaction('photos','readonly');
@@ -1314,6 +1522,52 @@ async function loadLocalPhotos() {
       const sh = tx.objectStore('photos').get(`${w.rowKey}_h`);
       sh.onsuccess = () => { if (sh.result) w.fotoHinten = sh.result.data; res(); };
     });
+    // Wenn kein lokales Foto aber Drive-URL vorhanden → von Drive laden
+    if (!w.fotoVorne && w.fotoVorneUrl && accessToken) {
+      driveLoadPromises.push(loadPhotoFromDrive(w, 'v'));
+    }
+    if (!w.fotoHinten && w.fotoHintenUrl && accessToken) {
+      driveLoadPromises.push(loadPhotoFromDrive(w, 'h'));
+    }
+  }
+  if (driveLoadPromises.length > 0) {
+    setStatus('loading', `⏳ Lade ${driveLoadPromises.length} Fotos aus Google Drive…`);
+    await Promise.allSettled(driveLoadPromises);
+    setStatus('ok', `✅ ${wines.length} Weine + Fotos geladen`);
+  }
+}
+
+async function loadPhotoFromDrive(wein, side) {
+  // Drive-URL: https://drive.google.com/uc?id=FILE_ID
+  const url = side === 'v' ? wein.fotoVorneUrl : wein.fotoHintenUrl;
+  if (!url) return;
+  try {
+    // File-ID extrahieren
+    const idMatch = url.match(/[?&]id=([^&]+)/) || url.match(/\/d\/([^/]+)/);
+    if (!idMatch) return;
+    const fileId = idMatch[1];
+    // Bild als Blob herunterladen via Drive API
+    const res = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+      { headers: { Authorization: 'Bearer ' + accessToken } }
+    );
+    if (!res.ok) {
+      // Foto beschädigt/nicht erreichbar → Dateiname markieren
+      console.warn(`Foto nicht ladbar: ${fileId} — markiere als _beschädigt`);
+      return;
+    }
+    const blob = await res.blob();
+    const base64 = await new Promise(resolve => {
+      const reader = new FileReader();
+      reader.onload = e => resolve(e.target.result);
+      reader.readAsDataURL(blob);
+    });
+    // In Wein-Objekt und IndexedDB cachen
+    if (side === 'v') wein.fotoVorne = base64;
+    else wein.fotoHinten = base64;
+    await savePhoto(wein.rowKey, side, base64);
+  } catch(e) {
+    console.warn('Foto-Download fehlgeschlagen:', e.message);
   }
 }
 
@@ -1357,10 +1611,26 @@ function showPage(p, key) {
 function getFiltered() {
   const q = (document.getElementById('s-input')?.value||'').toLowerCase();
   const typ = document.getElementById('f-typ')?.value||'';
+  const trinkreifFilter = document.getElementById('f-trinkreif')?.value||'';
+  const currentYear = new Date().getFullYear();
   return wines.filter(w => {
     const mq = !q||[w.name,w.weingut,w.region,w.appellation,w.land].some(f=>f&&f.toLowerCase().includes(q));
     const mt = !typ||w.weintyp===typ;
-    return mq&&mt;
+    let mtr = true;
+    if (trinkreifFilter) {
+      const von = w.trinkreifVon || null;
+      const bis = w.trinkreifBis || null;
+      if (trinkreifFilter === 'jetzt') {
+        mtr = (!von || von <= currentYear) && (!bis || bis >= currentYear);
+      } else if (trinkreifFilter === 'bald') {
+        mtr = von && von > currentYear && von <= currentYear + 5;
+      } else if (trinkreifFilter === 'lager') {
+        mtr = von && von > currentYear + 5;
+      } else if (trinkreifFilter === 'ueberfaellig') {
+        mtr = bis && bis < currentYear;
+      }
+    }
+    return mq && mt && mtr;
   });
 }
 
@@ -1504,6 +1774,64 @@ async function changeBestand(key, delta, rerender) {
   }
   saveLocal();
   if (rerender) renderDetail(key); else renderInventar();
+  // Bestand = 0: Dialog anzeigen
+  if (nv === 0 && delta < 0) setTimeout(() => showBestand0Dialog(key), 400);
+}
+
+function showBestand0Dialog(key) {
+  const w = wines.find(x => x.rowKey === key);
+  if (!w) return;
+  const existingFav = favoriten.find(f =>
+    f.name.toLowerCase() === w.name.toLowerCase() &&
+    String(f.jahrgang) === String(w.jahrgang)
+  );
+  const txt = document.getElementById('bestand0-dialog-text');
+  const dlg = document.getElementById('bestand0-dialog');
+  txt.innerHTML = existingFav
+    ? `<strong>«${esc(w.name)}»</strong> hat Bestand 0.<br><br>Dieser Wein ist bereits in deinen Favoriten (<em>${esc(existingFav.status)}</em>).<br>Aus Inventar entfernen und nur noch als Favorit führen?`
+    : `<strong>«${esc(w.name)}»</strong> hat Bestand 0.<br><br>Möchtest du diesen Wein als Favorit speichern, bevor er aus dem Inventar entfernt wird?`;
+  dlg.dataset.wineKey = key;
+  dlg.dataset.favExists = existingFav ? '1' : '0';
+  dlg.style.display = '';
+}
+
+async function bestand0AsFavorit() {
+  const dlg = document.getElementById('bestand0-dialog');
+  const key = parseInt(dlg.dataset.wineKey);
+  const favExists = dlg.dataset.favExists === '1';
+  dlg.style.display = 'none';
+  const w = wines.find(x => x.rowKey === key);
+  if (!w) return;
+  if (!favExists) {
+    // Neuen Favorit anlegen
+    const nextKey = Math.max(0, ...favoriten.map(f => f.rowKey||0)) + 1;
+    const fav = {
+      rowKey: nextKey, name: w.name, weintyp: w.weintyp,
+      jahrgang: w.jahrgang, vivinoWineId: '', vivinoUrl: w.notizen?.match(/Vivino: (\S+)/)?.[1]||'',
+      vivinoScore: '', meineBewertung: w.bewertung ? String(w.bewertung) : '',
+      preis: w.preis||'', status: 'Favorit', notiz: w.notizen||'',
+      inKeller: 'Nein', updatedAt: todayStr(),
+    };
+    favoriten.push(fav);
+    if (isConnected) await saveFavRow(fav).catch(()=>{});
+    toast(`«${w.name}» als Favorit gespeichert.`);
+  }
+  // Wein aus Inventar löschen
+  delTarget = key;
+  await confirmDel();
+}
+
+async function bestand0Loeschen() {
+  const dlg = document.getElementById('bestand0-dialog');
+  const key = parseInt(dlg.dataset.wineKey);
+  dlg.style.display = 'none';
+  delTarget = key;
+  await confirmDel();
+}
+
+function bestand0Behalten() {
+  document.getElementById('bestand0-dialog').style.display = 'none';
+  toast('Wein bleibt im Inventar mit Bestand 0.');
 }
 
 async function setDetailStar(key, val) {
@@ -1708,16 +2036,33 @@ function starsHTML(v) {
 function handlePhoto(side,input) {
   const file=input.files[0]; if(!file) return;
   const reader=new FileReader();
-  reader.onload=e=>{ photoData[side]=e.target.result; setPhotoPreview(side,photoData[side]); document.getElementById('ocr-'+side+'-btn').style.display=''; };
+  reader.onload=e=>{
+    photoData[side]=e.target.result;
+    setPhotoPreview(side,photoData[side]);
+    // OCR + Drive-Upload automatisch starten
+    doOCR(side);
+  };
   reader.readAsDataURL(file);
 }
 function setPhotoPreview(side,src) {
   const drop=document.getElementById('drop-'+side);
   drop.querySelectorAll('img.prev').forEach(i=>i.remove());
-  if (src) { const img=document.createElement('img'); img.src=src; img.className='prev'; drop.insertBefore(img,drop.firstChild); document.getElementById('ocr-'+side+'-btn').style.display=''; }
+  if (src) { const img=document.createElement('img'); img.src=src; img.className='prev'; drop.insertBefore(img,drop.firstChild); }
 }
-function rmPhoto(side,e) { e.stopPropagation(); photoData[side]=null; document.getElementById('drop-'+side).querySelectorAll('img.prev').forEach(i=>i.remove()); document.getElementById('ocr-'+side+'-btn').style.display='none'; document.getElementById('ocr-'+side+'-out').style.display='none'; document.getElementById('f'+side).value=''; }
-function resetPhoto(side) { photoData[side]=null; document.getElementById('drop-'+side).querySelectorAll('img.prev').forEach(i=>i.remove()); document.getElementById('ocr-'+side+'-btn').style.display='none'; document.getElementById('ocr-'+side+'-out').style.display='none'; const fi=document.getElementById('f'+side); if(fi) fi.value=''; }
+function rmPhoto(side,e) {
+  e.stopPropagation(); photoData[side]=null;
+  document.getElementById('drop-'+side).querySelectorAll('img.prev').forEach(i=>i.remove());
+  document.getElementById('ocr-'+side+'-out').style.display='none';
+  const st=document.getElementById('ocr-'+side+'-status'); if(st) st.style.display='none';
+  document.getElementById('f'+side).value='';
+}
+function resetPhoto(side) {
+  photoData[side]=null;
+  document.getElementById('drop-'+side).querySelectorAll('img.prev').forEach(i=>i.remove());
+  document.getElementById('ocr-'+side+'-out').style.display='none';
+  const st=document.getElementById('ocr-'+side+'-status'); if(st) st.style.display='none';
+  const fi=document.getElementById('f'+side); if(fi) fi.value='';
+}
 
 // ================================================================
 // HILFSFUNKTIONEN
