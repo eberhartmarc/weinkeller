@@ -396,12 +396,19 @@ const SHEET_NAME = 'Tabellenblatt1';
           <option value="">Alle Typen</option>
           <option>Weiss</option><option>Rot</option><option>Rosé</option><option>Orange</option><option>Sekt</option>
         </select>
-        <select id="f-trinkreif" onchange="renderInventar()" style="max-width:150px;width:auto">
+        <select id="f-trinkreif" onchange="renderInventar()" style="max-width:148px;width:auto">
           <option value="">Trinkreif: alle</option>
           <option value="jetzt">Jetzt trinkbar</option>
-          <option value="bald">Bald trinkbar (≤5 J.)</option>
+          <option value="bald">Bald (≤5 J.)</option>
           <option value="lager">Noch lagern</option>
           <option value="ueberfaellig">Überfällig</option>
+        </select>
+        <select id="f-fuellmenge" onchange="renderInventar()" style="max-width:148px;width:auto">
+          <option value="">Füllmenge: alle</option>
+          <option value="75">75 cl (Bouteille)</option>
+          <option value="37">37.5 cl (Demi)</option>
+          <option value="150">150 cl (Magnum)</option>
+          <option value="50">50 cl (Jennie)</option>
         </select>
         <div class="view-toggle">
           <button id="vg-btn" onclick="setView('grid')" title="Raster">
@@ -1612,10 +1619,22 @@ function getFiltered() {
   const q = (document.getElementById('s-input')?.value||'').toLowerCase();
   const typ = document.getElementById('f-typ')?.value||'';
   const trinkreifFilter = document.getElementById('f-trinkreif')?.value||'';
+  const fuellmengeFilter = document.getElementById('f-fuellmenge')?.value||'';
   const currentYear = new Date().getFullYear();
   return wines.filter(w => {
     const mq = !q||[w.name,w.weingut,w.region,w.appellation,w.land].some(f=>f&&f.toLowerCase().includes(q));
     const mt = !typ||w.weintyp===typ;
+    // Füllmengen-Filter: Zahlenwert in cl aus dem Feld extrahieren
+    let mfm = true;
+    if (fuellmengeFilter) {
+      const fm = w.fuellmenge||'';
+      const clMatch = fm.match(/(\d+(?:\.\d+)?)/);
+      const clVal = clMatch ? parseFloat(clMatch[1]) : 0;
+      if (fuellmengeFilter === '75')  mfm = clVal >= 74 && clVal <= 76;
+      else if (fuellmengeFilter === '37') mfm = clVal >= 37 && clVal <= 38;
+      else if (fuellmengeFilter === '150') mfm = clVal >= 149 && clVal <= 151;
+      else if (fuellmengeFilter === '50')  mfm = clVal >= 49 && clVal <= 51;
+    }
     let mtr = true;
     if (trinkreifFilter) {
       const von = w.trinkreifVon || null;
@@ -1630,7 +1649,7 @@ function getFiltered() {
         mtr = bis && bis < currentYear;
       }
     }
-    return mq && mt && mtr;
+    return mq && mt && mtr && mfm;
   });
 }
 
@@ -1660,6 +1679,7 @@ function cardHTML(w) {
       <div class="wine-card-name">${esc(w.name)}</div>
       <div class="wine-card-sub">${w.jahrgang} · ${esc(w.weingut)}</div>
       ${w.appellation?`<div class="wine-card-sub" style="font-size:.71rem;opacity:.65">${esc(w.appellation)}</div>`:''}
+      ${w.fuellmenge?`<div class="wine-card-sub" style="font-size:.71rem;color:var(--accent);font-weight:600">${esc(w.fuellmenge)}</div>`:''}
       ${w.bewertung?starsHTML(w.bewertung):''}
       <div class="wine-card-ctrls" onclick="event.stopPropagation()">
         <button class="btn-icon" onclick="changeBestand(${w.rowKey},-1)" ${w.bestand<=0?'disabled':''}>
@@ -1685,6 +1705,7 @@ function rowHTML(w) {
     <div class="wine-row-info">
       <div class="wine-row-name">${esc(w.name)} <span class="badge badge-${w.weintyp.toLowerCase()}">${w.weintyp}</span></div>
       <div class="wine-row-sub">${w.jahrgang} · ${esc(w.weingut)}${w.appellation?' · '+esc(w.appellation):''}</div>
+      <div class="wine-row-sub" style="font-size:.72rem;opacity:.7">${w.fuellmenge||''}${w.alkohol?' · '+w.alkohol+'%':''}</div>
       ${w.bewertung?starsHTML(w.bewertung):''}
     </div>
     <div class="wine-row-ctrls" onclick="event.stopPropagation()">
