@@ -871,66 +871,151 @@ async function doOCR(side) {
     setStatus('✅ Analyse fertig', '#16a34a');
 
   } catch(e) {
-    draftDiv.innerHTML = `<span style="color:var(--danger);font-size:.8rem">❌ Fehler: ${esc(e.message)}</span>`;
-    setStatus('❌ Fehler bei der Analyse', 'var(--danger)');
-    toast('Gemini Vision Fehler: '+e.message, 'err');
+    // Alle Versuche (2x 2.5-flash + 1x 1.5-flash) erschoepft
+    setStatus('❌ Analyse fehlgeschlagen', 'var(--danger)');
+    draftDiv.innerHTML = `
+      <div style="font-size:.8rem;font-weight:700;color:var(--danger);margin-bottom:8px">❌ Gemini nicht erreichbar:</div>
+      <div style="font-size:.75rem;color:var(--muted);margin-bottom:10px">${esc(e.message)}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button type="button" onclick="startTesseractFallback('${side}')" class="btn btn-outline btn-sm" style="border-color:var(--accent);color:var(--accent)">
+          📝 Texterkennung starten
+        </button>
+        <button type="button" onclick="startManualInput()" class="btn btn-outline btn-sm">
+          ✍️ Manuell eingeben
+        </button>
+      </div>`;
+    geminiStatusEl.textContent = '';
+    applyBtn.style.display = 'none';
+    toast('Gemini nicht verfügbar — Fallback-Optionen werden angezeigt.', 'err');
   }
 }
 
-// Gemini Vision: Foto als base64 direkt analysieren
+function startManualInput() {
+  // Analyse-Panel ausblenden, Fokus auf erstes Pflichtfeld
+  document.getElementById('ocr-results-panel').style.display = 'none';
+  const nameField = document.getElementById('fn');
+  if (nameField) { nameField.focus(); nameField.style.borderColor='var(--accent)'; setTimeout(()=>nameField.style.borderColor='',3000); }
+  toast('Bitte Felder manuell ausfüllen.');
+}
+
+// Gemini Vision: Foto als base64 — mit Retry + Modell-Fallback
+const VISION_MODELS = ['gemini-2.5-flash', 'gemini-1.5-flash'];
+
 async function geminiVisionAnalyze(base64DataUrl) {
   const key = getGeminiKey();
   const mimeMatch = base64DataUrl.match(/data:(image\/[a-z+]+);base64,/);
   const mimeType  = mimeMatch ? mimeMatch[1] : 'image/jpeg';
   const base64Data = base64DataUrl.split(',')[1];
 
-  const prompt = `Du bist ein Weinexperte. Analysiere dieses Foto eines Weins oder Weindisplays.
-
-Extrahiere alle erkennbaren Informationen aus dem Etikett und antworte AUSSCHLIESSLICH mit folgendem JSON (kein Markdown, keine Erklärungen):
+  const prompt = `Du bist ein Weinexperte. Analysiere dieses Foto eines Weins.
+Extrahiere alle erkennbaren Informationen und antworte NUR mit diesem JSON:
 {
-  "name":         {"value": "Name des Weins",       "confidence": "high|mid|low|none"},
-  "weingut":      {"value": "Weingut / Produzent",   "confidence": "high|mid|low|none"},
-  "weintyp":      {"value": "Rot|Weiss|Rosé|Orange|Sekt", "confidence": "high|mid|low|none"},
-  "traubensorten":{"value": "z.B. Pinot Noir",       "confidence": "high|mid|low|none"},
-  "jahrgang":     {"value": 2019,                    "confidence": "high|mid|low|none"},
-  "alkohol":      {"value": 13.5,                    "confidence": "high|mid|low|none"},
-  "fuellmenge":   {"value": "75 cl",                 "confidence": "high|mid|low|none"},
-  "land":         {"value": "Schweiz",               "confidence": "high|mid|low|none"},
-  "region":       {"value": "Wallis",                "confidence": "high|mid|low|none"},
-  "appellation":  {"value": "Valais AOC",            "confidence": "high|mid|low|none"},
-  "qualitaetsstufe":{"value": "AOC",                 "confidence": "high|mid|low|none"}
+  "name":         {"value": "Name des Weins",  "confidence": "high|mid|low|none"},
+  "weingut":      {"value": "Weingut",         "confidence": "high|mid|low|none"},
+  "weintyp":      {"value": "Rot|Weiss|Rose|Orange|Sekt", "confidence": "high|mid|low|none"},
+  "traubensorten":{"value": "Rebsorte(n)",     "confidence": "high|mid|low|none"},
+  "jahrgang":     {"value": 2019,              "confidence": "high|mid|low|none"},
+  "alkohol":      {"value": 13.5,              "confidence": "high|mid|low|none"},
+  "fuellmenge":   {"value": "75 cl",           "confidence": "high|mid|low|none"},
+  "land":         {"value": "Schweiz",         "confidence": "high|mid|low|none"},
+  "region":       {"value": "Wallis",          "confidence": "high|mid|low|none"},
+  "appellation":  {"value": "Valais AOC",      "confidence": "high|mid|low|none"},
+  "qualitaetsstufe":{"value": "AOC",           "confidence": "high|mid|low|none"}
+}
+Regeln: confidence "high"=klar lesbar, "mid"=erkennbar, "low"=Schaetzung, "none"=nicht erkennbar->null
+fuellmenge in cl, jahrgang+alkohol als Zahl, weintyp: Rot/Weiss/Rose/Orange/Sekt`;
+
+  const makeReq = async (model) => {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+      { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ contents:[{ parts:[
+          { text: prompt },
+          { inline_data: { mime_type: mimeType, data: base64Data } }
+        ]}] }) }
+    );
+    const d = await res.json();
+    if (d.error) {
+      const isOverload = /high demand|overloaded|quota|temporarily/i.test(d.error.message||'');
+      throw Object.assign(new Error(d.error.message), { isOverload });
+    }
+    const raw = d.candidates?.[0]?.content?.parts?.[0]?.text||'';
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (!m) throw new Error('Kein JSON in Antwort');
+    return JSON.parse(m[0]);
+  };
+
+  const setVisionStatus = (msg) => {
+    ['ocr-v-status','ocr-h-status'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el && el.style.display !== 'none') el.textContent = msg;
+    });
+    const gs = document.getElementById('ocr-gemini-status');
+    if (gs) gs.textContent = msg;
+  };
+
+  // Strategie: 2x Hauptmodell (3s Pause) → 1x Fallback-Modell
+  for (let mi = 0; mi < VISION_MODELS.length; mi++) {
+    const model = VISION_MODELS[mi];
+    const tries = mi === 0 ? 2 : 1;
+    for (let t = 1; t <= tries; t++) {
+      try {
+        const label = mi===0
+          ? (t===1 ? '⏳ Gemini Vision analysiert…' : '⏳ Versuch 2/2 (3s Pause)…')
+          : '⏳ Fallback-Modell (1.5-flash)…';
+        setVisionStatus(label);
+        return await makeReq(model);
+      } catch(e) {
+        const isLast = (mi===VISION_MODELS.length-1) && (t===tries);
+        if (isLast) throw e;
+        if (e.isOverload && t < tries) await new Promise(r=>setTimeout(r,3000));
+      }
+    }
+  }
 }
 
-Regeln:
-- confidence "high": klar lesbar auf dem Etikett
-- confidence "mid": erkennbar aber möglicherweise unklar
-- confidence "low": Schätzung / abgeleitet
-- confidence "none": nicht erkennbar → value: null
-- fuellmenge immer in cl (z.B. "75 cl", "37.5 cl", "150 cl")
-- jahrgang und alkohol als Zahl (kein String)
-- weintyp NUR eines von: Rot, Weiss, Rosé, Orange, Sekt`;
-
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{
-          parts: [
-            { text: prompt },
-            { inline_data: { mime_type: mimeType, data: base64Data } }
-          ]
-        }]
-      })
+// Tesseract-Fallback wenn Gemini komplett scheitert
+const OCR_LANGS_FB = 'deu+fra+eng+ita+spa+por';
+async function startTesseractFallback(side) {
+  const src = photoData[side];
+  if (!src) return;
+  const panel = document.getElementById('ocr-results-panel');
+  const draftDiv = document.getElementById('ocr-fields-draft');
+  const geminiStatusEl = document.getElementById('ocr-gemini-status');
+  const applyBtn = document.getElementById('ocr-apply-btn');
+  panel.style.display='';
+  draftDiv.innerHTML='<span style="color:var(--muted);font-size:.8rem">⏳ Starte klassische Texterkennung…</span>';
+  applyBtn.style.display='none';
+  try {
+    if (typeof Tesseract==='undefined') {
+      draftDiv.innerHTML='<span style="color:var(--muted);font-size:.8rem">⏳ Lade OCR-Engine…</span>';
+      await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
     }
-  );
-  const d = await res.json();
-  if (d.error) throw new Error(d.error.message);
-  const raw = d.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  const m = raw.match(/\{[\s\S]*\}/);
-  if (!m) throw new Error('Kein JSON in der Gemini-Antwort');
-  return JSON.parse(m[0]);
+    draftDiv.innerHTML='<span style="color:var(--muted);font-size:.8rem">⏳ Texterkennung läuft…</span>';
+    const { data: { text } } = await Tesseract.recognize(src, OCR_LANGS_FB, { logger:()=>{} });
+    const isDark = document.documentElement.classList.contains('dark');
+    const oc = isDark ? '#fde68a' : '#92400e';
+    const ex = { jahrgang:normJahrgang(text), alkohol:normAlkohol(text), fuellmenge:normFuellmenge(text) };
+    let applied=0;
+    const fmap = { jahrgang:'fjg', alkohol:'fal', fuellmenge:'ffm' };
+    for (const [k,v] of Object.entries(ex)) {
+      if (!v) continue;
+      const el = document.getElementById(fmap[k]);
+      if (!el||el.value.trim()) continue;
+      el.value=v; el.style.borderColor=oc;
+      el.style.background=isDark?'rgba(234,179,8,0.18)':'rgba(234,179,8,0.15)';
+      applied++;
+    }
+    updSig();
+    const outEl = document.getElementById('ocr-'+side+'-out');
+    if(outEl){outEl.textContent=text;outEl.style.display='';}
+    draftDiv.innerHTML=`<div style="font-size:.8rem;font-weight:700;margin-bottom:5px">📝 Texterkennung (Fallback):</div><div style="font-size:.75rem;color:${oc}">${applied} Felder vorabgefüllt (Jahrgang, Alkohol, Füllmenge). Übrige bitte manuell ergänzen.</div>`;
+    if(geminiStatusEl) geminiStatusEl.textContent='';
+    toast('Texterkennung: '+applied+' Felder erkannt.');
+  } catch(e) {
+    draftDiv.innerHTML=`<span style="color:var(--danger);font-size:.8rem">❌ OCR fehlgeschlagen: ${e.message}</span>`;
+    toast('OCR fehlgeschlagen: '+e.message,'err');
+  }
 }
 
 // Werte ins Formular schreiben + visuell markieren
