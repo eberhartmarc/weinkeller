@@ -806,131 +806,261 @@ async function testGeminiKey() {
 }
 
 // ================================================================
-// OCR ENGINE v3 — zweistufig: Tesseract (Draft) → Gemini (Final)
+// GEMINI VISION ENGINE v4 — Foto direkt an Gemini Vision
 // ================================================================
-const OCR_LANGS = 'deu+fra+eng+ita+spa+por+nld+cat+slo+ces+hun+ron+hrv+slk+bul';
-// 15 Sprachen: Deutsch, Französisch, Englisch, Italienisch, Spanisch,
-// Portugiesisch, Niederländisch, Katalanisch, Slowenisch, Tschechisch,
-// Ungarisch, Rumänisch, Kroatisch, Slowakisch, Bulgarisch
+let _visionResult = null;   // Ergebnis der Gemini Vision Analyse
+let _visionSide  = null;    // Welche Seite gerade analysiert wurde
 
-let _ocrDraftResult = null; // Draft-Ergebnis (Tesseract)
-let _ocrFinalResult = null; // Finales Ergebnis (Gemini-geprüft)
-
-// Hauptfunktion: wird automatisch nach Foto-Upload aufgerufen
+// Hauptfunktion — automatisch nach Foto-Upload
 async function doOCR(side) {
   const src = photoData[side];
   if (!src) return;
+  _visionSide = side;
 
   const statusEl = document.getElementById('ocr-'+side+'-status');
-  const outEl = document.getElementById('ocr-'+side+'-out');
-  const panel = document.getElementById('ocr-results-panel');
+  const panel    = document.getElementById('ocr-results-panel');
   const draftDiv = document.getElementById('ocr-fields-draft');
   const finalDiv = document.getElementById('ocr-fields-final');
-  const geminiStatus = document.getElementById('ocr-gemini-status');
+  const geminiStatusEl = document.getElementById('ocr-gemini-status');
   const applyBtn = document.getElementById('ocr-apply-btn');
-  const isDark = document.documentElement.classList.contains('dark');
 
-  // Farben für Draft vs. Final je nach Modus
-  const draftColor = isDark ? '#6b5040' : '#c8a880';  // gedimmt
-  const finalColor = isDark ? '#e8d5b8' : '#3a1a0a';  // klar lesbar
+  const setStatus = (msg, color) => {
+    if (!statusEl) return;
+    statusEl.style.display = '';
+    statusEl.textContent = msg;
+    statusEl.style.color = color || 'var(--muted)';
+    statusEl.style.background = 'transparent';
+  };
 
-  // Step 1: Drive-Upload + OCR
-  if (statusEl) { statusEl.textContent = '⏳ Hochladen + OCR…'; statusEl.style.display=''; statusEl.style.background='var(--muted)/20'; statusEl.style.color='var(--muted)'; }
-
+  // 1) Drive-Upload parallel starten (non-blocking)
   if (isConnected && src) {
+    setStatus('⏳ Analysiere Etikett mit Gemini Vision…');
     const sideLabel = side==='v'?'vorne':'hinten';
-    const url = await uploadPhotoToDrive(src, `foto_${sideLabel}_${Date.now()}.jpg`);
-    if (url) { if(side==='v') window._pendingDriveVorne=url; else window._pendingDriveHinten=url; }
+    uploadPhotoToDrive(src, `foto_${sideLabel}_${Date.now()}.jpg`).then(url => {
+      if (url) { if(side==='v') window._pendingDriveVorne=url; else window._pendingDriveHinten=url; }
+    });
+  } else {
+    setStatus('⏳ Analysiere Etikett…');
   }
+
+  const key = getGeminiKey();
+  if (!key) {
+    setStatus('⚠️ Kein Gemini API Key — bitte in Einstellungen eintragen.', 'var(--danger)');
+    toast('Gemini API Key fehlt.','err'); return;
+  }
+
+  panel.style.display = '';
+  draftDiv.innerHTML = '<span style="color:var(--muted);font-size:.8rem">⏳ Gemini Vision analysiert das Etikett…</span>';
+  finalDiv.style.display = 'none';
+  geminiStatusEl.textContent = '';
+  applyBtn.style.display = 'none';
 
   try {
-    if (typeof Tesseract==='undefined') {
-      if(statusEl) statusEl.textContent='⏳ Lade OCR-Engine…';
-      await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
+    // 2) Gemini Vision: base64-Bild direkt übergeben
+    const result = await geminiVisionAnalyze(src);
+    _visionResult = result;
+
+    if (!result) {
+      draftDiv.innerHTML = '<span style="color:var(--danger);font-size:.8rem">❌ Gemini konnte das Etikett nicht analysieren.</span>';
+      setStatus('❌ Analyse fehlgeschlagen', 'var(--danger)');
+      return;
     }
-    if(statusEl) statusEl.textContent='⏳ Texterkennung…';
-    const { data: { text } } = await Tesseract.recognize(src, OCR_LANGS, { logger:()=>{} });
 
-    // Draft-Ergebnis (Tesseract)
-    _ocrDraftResult = parseOCRText(text);
-    outEl.textContent = text; outEl.style.display='';
+    // 3) Felder direkt ins Formular schreiben + markieren
+    applyVisionToForm(result);
+    setStatus('✅ Analyse fertig', '#16a34a');
 
-    // Draft anzeigen (gedimmt)
-    panel.style.display='';
-    draftDiv.innerHTML = renderOCRFieldList(_ocrDraftResult, draftColor, 'Draft (OCR)');
-    finalDiv.style.display='none';
-    geminiStatus.textContent='⏳ Gemini prüft und verbessert…';
-    applyBtn.style.display='none';
-    if(statusEl) { statusEl.textContent='⏳ KI-Prüfung…'; }
-
-    // Step 2: Automatisch Gemini zur Plausibilisierung
-    const key = getGeminiKey();
-    if (key) {
-      const geminiResult = await geminiValidateOCR(text, _ocrDraftResult);
-      if (geminiResult) {
-        _ocrFinalResult = geminiResult;
-        finalDiv.innerHTML = renderOCRFieldList(geminiResult, finalColor, 'KI-geprüft ✅');
-        finalDiv.style.display='';
-        draftDiv.style.display='none'; // Draft durch Final ersetzen
-        geminiStatus.textContent='✅ Gemini hat die Erkennungen geprüft und optimiert.';
-        if(statusEl) { statusEl.textContent='✅ Fertig'; statusEl.style.color='#16a34a'; }
-      } else {
-        // Gemini nicht verfügbar → Draft-Ergebnis als Final verwenden
-        _ocrFinalResult = _ocrDraftResult;
-        geminiStatus.textContent='⚠️ Gemini nicht verfügbar — OCR-Ergebnis direkt.';
-        if(statusEl) { statusEl.textContent='✅ OCR fertig (ohne KI)'; }
-      }
-    } else {
-      _ocrFinalResult = _ocrDraftResult;
-      geminiStatus.textContent='💡 Kein Gemini-Key — OCR-Ergebnis direkt verwenden.';
-      if(statusEl) { statusEl.textContent='✅ OCR fertig'; }
-    }
-    applyBtn.style.display='';
   } catch(e) {
-    if(statusEl) { statusEl.textContent='❌ Fehler: '+e.message; statusEl.style.color='var(--danger)'; }
-    toast('OCR fehlgeschlagen: '+e.message,'err');
+    draftDiv.innerHTML = `<span style="color:var(--danger);font-size:.8rem">❌ Fehler: ${esc(e.message)}</span>`;
+    setStatus('❌ Fehler bei der Analyse', 'var(--danger)');
+    toast('Gemini Vision Fehler: '+e.message, 'err');
   }
 }
 
-// Rendert eine Liste erkannter Felder als HTML
-function renderOCRFieldList(result, color, label) {
-  const fieldMap = { jahrgang:'Jahrgang', alkohol:'Alkohol', fuellmenge:'Füllmenge',
-    preis:'Preis', land:'Land', region:'Region', appellation:'Appellation',
-    name:'Name', weingut:'Weingut' };
-  const found = Object.entries(result).filter(([,d])=>d.confidence!=='none'&&d.value);
-  if (!found.length) return `<span style="color:${color};font-size:.78rem">Keine Felder erkannt.</span>`;
-  return `<div style="font-size:.72rem;font-weight:700;color:${color};margin-bottom:4px">${label}</div>
-    <div style="display:flex;flex-wrap:wrap;gap:4px">`+
-    found.map(([key,d])=>`<span style="border:1.5px solid ${color};border-radius:5px;padding:2px 8px;font-size:.78rem;color:${color}">${fieldMap[key]||key}: <strong>${esc(String(d.value))}</strong></span>`).join('')
-  +'</div>';
-}
-
-// Gemini validiert und verbessert OCR-Ergebnis
-async function geminiValidateOCR(rawText, draftResult) {
+// Gemini Vision: Foto als base64 direkt analysieren
+async function geminiVisionAnalyze(base64DataUrl) {
   const key = getGeminiKey();
-  if (!key) return null;
-  const prompt = `Du bist ein Weinexperte. Analysiere diesen OCR-Text eines Weins und extrahiere alle möglichen Informationen:
+  const mimeMatch = base64DataUrl.match(/data:(image\/[a-z+]+);base64,/);
+  const mimeType  = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+  const base64Data = base64DataUrl.split(',')[1];
 
-OCR-Text:
-${rawText}
+  const prompt = `Du bist ein Weinexperte. Analysiere dieses Foto eines Weins oder Weindisplays.
 
-Vorherige Erkennung (zur Plausibilisierung):
-Jahrgang: ${draftResult.jahrgang?.value||'?'}, Alkohol: ${draftResult.alkohol?.value||'?'}, Füllmenge: ${draftResult.fuellmenge?.value||'?'}
-
-Antworte NUR mit diesem JSON:
+Extrahiere alle erkennbaren Informationen aus dem Etikett und antworte AUSSCHLIESSLICH mit folgendem JSON (kein Markdown, keine Erklärungen):
 {
-  "jahrgang":  {"value": 2019, "confidence": "high"},
-  "alkohol":   {"value": 13.5, "confidence": "high"},
-  "fuellmenge":{"value": "75 cl", "confidence": "high"},
-  "preis":     {"value": null, "confidence": "none"},
-  "land":      {"value": "Schweiz", "confidence": "mid"},
-  "region":    {"value": "Wallis", "confidence": "mid"},
-  "appellation":{"value": "Valais AOC", "confidence": "mid"},
-  "name":      {"value": "Marnin Rouge", "confidence": "low"},
-  "weingut":   {"value": "Andreywein AG", "confidence": "low"}
+  "name":         {"value": "Name des Weins",       "confidence": "high|mid|low|none"},
+  "weingut":      {"value": "Weingut / Produzent",   "confidence": "high|mid|low|none"},
+  "weintyp":      {"value": "Rot|Weiss|Rosé|Orange|Sekt", "confidence": "high|mid|low|none"},
+  "traubensorten":{"value": "z.B. Pinot Noir",       "confidence": "high|mid|low|none"},
+  "jahrgang":     {"value": 2019,                    "confidence": "high|mid|low|none"},
+  "alkohol":      {"value": 13.5,                    "confidence": "high|mid|low|none"},
+  "fuellmenge":   {"value": "75 cl",                 "confidence": "high|mid|low|none"},
+  "land":         {"value": "Schweiz",               "confidence": "high|mid|low|none"},
+  "region":       {"value": "Wallis",                "confidence": "high|mid|low|none"},
+  "appellation":  {"value": "Valais AOC",            "confidence": "high|mid|low|none"},
+  "qualitaetsstufe":{"value": "AOC",                 "confidence": "high|mid|low|none"}
 }
-Wenn ein Wert nicht erkennbar ist, setze value: null und confidence: "none".
-Korrigiere offensichtliche OCR-Fehler (z.B. 'l3.5%' -> 13.5).`;
+
+Regeln:
+- confidence "high": klar lesbar auf dem Etikett
+- confidence "mid": erkennbar aber möglicherweise unklar
+- confidence "low": Schätzung / abgeleitet
+- confidence "none": nicht erkennbar → value: null
+- fuellmenge immer in cl (z.B. "75 cl", "37.5 cl", "150 cl")
+- jahrgang und alkohol als Zahl (kein String)
+- weintyp NUR eines von: Rot, Weiss, Rosé, Orange, Sekt`;
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { text: prompt },
+            { inline_data: { mime_type: mimeType, data: base64Data } }
+          ]
+        }]
+      })
+    }
+  );
+  const d = await res.json();
+  if (d.error) throw new Error(d.error.message);
+  const raw = d.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  const m = raw.match(/\{[\s\S]*\}/);
+  if (!m) throw new Error('Kein JSON in der Gemini-Antwort');
+  return JSON.parse(m[0]);
+}
+
+// Werte ins Formular schreiben + visuell markieren
+const FIELD_MAP_VISION = {
+  name:'fn', weingut:'fwg', weintyp:'fwt', traubensorten:'ftr',
+  jahrgang:'fjg', alkohol:'fal', fuellmenge:'ffm',
+  land:'fla', region:'frg', appellation:'fap', qualitaetsstufe:'fqs',
+};
+
+function applyVisionToForm(result) {
+  const isDark = document.documentElement.classList.contains('dark');
+  const panel = document.getElementById('ocr-results-panel');
+  const draftDiv = document.getElementById('ocr-fields-draft');
+  const applyBtn = document.getElementById('ocr-apply-btn');
+  const geminiStatusEl = document.getElementById('ocr-gemini-status');
+
+  // Farben je Konfidenz und Modus
+  const colors = {
+    high: isDark ? '#86efac' : '#15803d',   // grün — sicher
+    mid:  isDark ? '#fde68a' : '#92400e',   // gelb — prüfen
+    low:  isDark ? '#fca5a5' : '#b91c1c',   // rot — unsicher
+    none: null,
+  };
+  const bgColors = {
+    high: isDark ? 'rgba(22,163,74,0.12)'  : 'rgba(22,163,74,0.08)',
+    mid:  isDark ? 'rgba(234,179,8,0.18)'  : 'rgba(234,179,8,0.15)',
+    low:  isDark ? 'rgba(239,68,68,0.18)'  : 'rgba(239,68,68,0.10)',
+    none: null,
+  };
+
+  let highCount = 0, midCount = 0, lowCount = 0, noneCount = 0;
+  const pending = []; // Felder mit low/none für zweiten Durchlauf
+
+  for (const [key, fieldId] of Object.entries(FIELD_MAP_VISION)) {
+    const data = result[key];
+    if (!data) continue;
+    const conf = data.confidence;
+    const val  = data.value;
+    const el   = document.getElementById(fieldId);
+    if (!el) continue;
+
+    if (conf === 'none' || val === null || val === undefined) {
+      // Nicht befüllen, aber gelb umranden als Hinweis
+      el.style.borderColor = isDark ? '#6b5040' : '#e5c089';
+      el.style.background  = '';
+      noneCount++;
+      pending.push(key);
+      continue;
+    }
+
+    if (conf === 'high' || conf === 'mid') {
+      // Wert einsetzen — auch bestehende überschreiben (Foto ist Quelle der Wahrheit)
+      el.value = val;
+      el.style.borderColor = colors[conf];
+      el.style.background  = bgColors[conf];
+      if (conf === 'high') highCount++; else { midCount++; pending.push(key); }
+    } else if (conf === 'low') {
+      // Nur einsetzen wenn leer, gelb markieren
+      if (!el.value.trim()) el.value = val;
+      el.style.borderColor = colors.low;
+      el.style.background  = bgColors.low;
+      lowCount++;
+      pending.push(key);
+    }
+  }
+
+  updSig();
+
+  // Summary Panel
+  const summaryParts = [];
+  if (highCount) summaryParts.push(`<span style="color:${colors.high}">&#9632; ${highCount} sicher</span>`);
+  if (midCount)  summaryParts.push(`<span style="color:${colors.mid}">&#9632; ${midCount} prüfen (gelb)</span>`);
+  if (lowCount)  summaryParts.push(`<span style="color:${colors.low}">&#9632; ${lowCount} unsicher (rot)</span>`);
+  if (noneCount) summaryParts.push(`<span style="color:var(--muted)">${noneCount} nicht erkannt</span>`);
+
+  draftDiv.innerHTML = `
+    <div style="font-size:.8rem;font-weight:700;margin-bottom:6px">🤖 Gemini Vision Analyse:</div>
+    <div style="font-size:.78rem;display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px">${summaryParts.join(' &nbsp;&middot;&nbsp; ')}</div>
+    <div style="font-size:.75rem;color:var(--muted)">
+      🟢 Grün = sicher übernommen  |  🟡 Gelb = bitte prüfen  |  🔴 Rot = unsicher, bitte korrigieren
+    </div>`;
+
+  if (pending.length) {
+    geminiStatusEl.innerHTML = `<span style="color:var(--muted);font-size:.78rem">Markierte Felder ergänzen, dann erneut an Gemini senden:</span>`;
+    applyBtn.style.display = '';
+    applyBtn.textContent = '🤖 Ergänzungen an Gemini senden';
+    applyBtn.disabled = false;
+    applyBtn.onclick = () => geminiVisionRefinement(result, pending);
+  } else {
+    geminiStatusEl.textContent = '✅ Alle Felder erkannt — nichts zu prüfen.';
+    applyBtn.style.display = 'none';
+  }
+
+  panel.style.display = '';
+}
+
+// Zweiter Durchlauf: manuelle Korrekturen + fehlende Felder an Gemini
+async function geminiVisionRefinement(prevResult, pendingKeys) {
+  const key = getGeminiKey();
+  if (!key) return;
+
+  const applyBtn = document.getElementById('ocr-apply-btn');
+  const geminiStatusEl = document.getElementById('ocr-gemini-status');
+  applyBtn.disabled = true;
+  applyBtn.textContent = '⏳ Gemini prüft…';
+
+  // Aktuelle Formularwerte einlesen (was der Nutzer ergänzt hat)
+  const currentValues = {};
+  for (const [key2, fieldId] of Object.entries(FIELD_MAP_VISION)) {
+    const el = document.getElementById(fieldId);
+    if (el && el.value.trim()) currentValues[key2] = el.value.trim();
+  }
+
+  const missingFields = pendingKeys.filter(k => !currentValues[k]);
+  const correctedFields = pendingKeys.filter(k => currentValues[k]);
+
+  const prompt = `Du bist ein Weinexperte. Ergänze fehlende Felder für diesen Wein.
+
+Bekannte Werte (vom Nutzer bestätigt oder vom Etikett):
+${JSON.stringify(currentValues, null, 2)}
+
+Noch fehlende Felder: ${missingFields.join(', ')||'keine'}
+
+Antworte NUR mit JSON für die fehlenden Felder:
+{
+  ${missingFields.map(f => `"${f}": {"value": null, "confidence": "none"}`).join(',\n  ')}
+}
+Fülle aus was du aufgrund der bekannten Werte schließen kannst.
+Wenn nicht erkennbar: value null, confidence none.`;
+
   try {
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`,
@@ -938,41 +1068,45 @@ Korrigiere offensichtliche OCR-Fehler (z.B. 'l3.5%' -> 13.5).`;
         body: JSON.stringify({ contents:[{ parts:[{ text:prompt }] }] }) }
     );
     const d = await res.json();
-    if (d.error) return null;
+    if (d.error) throw new Error(d.error.message);
     const raw = d.candidates?.[0]?.content?.parts?.[0]?.text||'{}';
     const m = raw.match(/\{[\s\S]*\}/);
-    if (!m) return null;
-    return JSON.parse(m[0]);
-  } catch(e) { return null; }
+    if (m) {
+      const refined = JSON.parse(m[0]);
+      const isDark = document.documentElement.classList.contains('dark');
+      for (const [fKey, fData] of Object.entries(refined)) {
+        if (!fData?.value) continue;
+        const fieldId = FIELD_MAP_VISION[fKey];
+        if (!fieldId) continue;
+        const el = document.getElementById(fieldId);
+        if (!el || el.value.trim()) continue;
+        el.value = fData.value;
+        el.style.borderColor = isDark ? '#86efac' : '#15803d';
+        el.style.background  = isDark ? 'rgba(22,163,74,0.12)' : 'rgba(22,163,74,0.08)';
+      }
+      updSig();
+    }
+    geminiStatusEl.textContent = '✅ Zweiter Durchlauf abgeschlossen.';
+    applyBtn.textContent = '✔️ Analyse abgeschlossen';
+    applyBtn.disabled = true;
+    // Feldmarkierungen zurücksetzen
+    setTimeout(() => {
+      for (const fieldId of Object.values(FIELD_MAP_VISION)) {
+        const el = document.getElementById(fieldId);
+        if (el) { el.style.borderColor=''; el.style.background=''; }
+      }
+    }, 3000);
+    toast('Felder ergänzt.');
+  } catch(e) {
+    geminiStatusEl.textContent = '❌ Fehler: '+e.message;
+    applyBtn.disabled = false;
+    applyBtn.textContent = '🤖 Ergänzungen an Gemini senden';
+    toast('Gemini Fehler: '+e.message, 'err');
+  }
 }
 
-// Button "Einträge übernehmen" — wendet finale Erkennungen auf Formularfelder an
-function applyOCRFinal() {
-  const result = _ocrFinalResult || _ocrDraftResult;
-  if (!result) return;
-  const fieldMap = {
-    jahrgang:'fjg', alkohol:'fal', fuellmenge:'ffm', preis:'fpr',
-    land:'fla', region:'frg', appellation:'fap', name:'fn', weingut:'fwg',
-  };
-  const isDark = document.documentElement.classList.contains('dark');
-  const finalColor = isDark ? '#e8d5b8' : '#3a1a0a';
-  let applied = 0;
-  for (const [key2, fieldId] of Object.entries(fieldMap)) {
-    const data = result[key2];
-    if (!data || data.confidence==='none' || !data.value) continue;
-    const el = document.getElementById(fieldId);
-    if (!el || el.value.trim()) continue; // Nicht überschreiben
-    el.value = data.value;
-    el.style.color = finalColor;
-    el.style.fontWeight = '600';
-    setTimeout(()=>{ el.style.color=''; el.style.fontWeight=''; }, 3000);
-    applied++;
-  }
-  updSig();
-  document.getElementById('ocr-apply-btn').textContent = `✔️ ${applied} Felder übernommen`;
-  document.getElementById('ocr-apply-btn').disabled = true;
-  toast(`${applied} Felder übernommen.`);
-}
+// Legacy applyOCRFinal (Kompatibilität)
+function applyOCRFinal() { if (_visionResult) applyVisionToForm(_visionResult); }
 
 // ----------------------------------------------------------------
 // GEMINI PREISSUCHE — Kernfunktion mit Jahrgangs-Fallback
@@ -2099,10 +2233,8 @@ function loadScript(src) {
 }
 
 // ================================================================
-// OCR ENGINE v2 — robuste Extraktion mit Erkennungs-Panel
+// HILFSFUNKTIONEN (Normalisierung Legacy — nur noch für Validierung)
 // ================================================================
-
-// Normalisierungsfunktionen
 function normJahrgang(text) {
   // Alle 4-stelligen Jahreszahlen 1900-2030 sammeln
   const matches = [...text.matchAll(/\b((?:19|20)\d{2})\b/g)].map(m => parseInt(m[1]));
@@ -2338,58 +2470,6 @@ function applyAllOCR(result) {
   }
   updSig();
   toast(`${applied} Felder übernommen — bitte prüfen!`);
-}
-
-async function doOCR(side) {
-  const src = photoData[side];
-  if (!src) { toast('Kein Foto vorhanden.', 'err'); return; }
-  const btn = document.getElementById('ocr-'+side+'-btn');
-  const out = document.getElementById('ocr-'+side+'-out');
-  btn.disabled = true;
-  btn.innerHTML = '⏳ OCR läuft…';
-
-  // 1) Foto parallel in Drive hochladen (falls verbunden)
-  if (isConnected && src) {
-    const sideLabel = side === 'v' ? 'vorne' : 'hinten';
-    const ts = Date.now();
-    const fname = `foto_${sideLabel}_${ts}.jpg`;
-    btn.innerHTML = '⏳ Lade Foto in Drive…';
-    const driveUrl = await uploadPhotoToDrive(src, fname);
-    if (driveUrl) {
-      if (side === 'v') {
-        // Merke Drive-URL für späteres Speichern
-        window._pendingDriveVorne = driveUrl;
-      } else {
-        window._pendingDriveHinten = driveUrl;
-      }
-      toast(`Foto ${sideLabel} in Google Drive gespeichert ✔`);
-    }
-    btn.innerHTML = '⏳ OCR läuft…';
-  }
-
-  // 2) OCR starten
-  try {
-    if (typeof Tesseract === 'undefined') {
-      btn.innerHTML = '⏳ Lade OCR-Engine…';
-      await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
-    }
-    const { data: { text } } = await Tesseract.recognize(src, 'deu+fra+eng+ita', {
-      logger: () => {},
-    });
-    out.textContent = text;
-    out.style.display = '';
-    const result = parseOCRText(text);
-    renderOCRPanel(result, side);
-    const found = Object.values(result).filter(d => d.confidence !== 'none').length;
-    toast(`OCR: ${found} Felder erkannt — prüfen und übernehmen.`);
-  } catch(err) {
-    out.textContent = 'Fehler: ' + err.message;
-    out.style.display = '';
-    toast('OCR fehlgeschlagen: ' + err.message, 'err');
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = side === 'v' ? '🔍 OCR Vorne' : '🔍 OCR Hinten';
-  }
 }
 
 // ================================================================
