@@ -753,7 +753,7 @@ function saveConfig() {
 // ----------------------------------------------------------------
 // GEMINI API KEY VERWALTUNG
 // ----------------------------------------------------------------
-const APP_VERSION = 'v2.0.1';
+const APP_VERSION = 'v2.1.2';
 const _GEMINI_DEFAULT = 'AIzaSyCFwbj2C6J7cjFsRvw-LmKY-aT9jgCtVbo';
 function getGeminiKey() {
   try { return localStorage.getItem('wk-gemini-key') || _GEMINI_DEFAULT; } catch(e) { return _GEMINI_DEFAULT; }
@@ -910,19 +910,20 @@ async function geminiVisionAnalyze(base64DataUrl) {
   const prompt = `Du bist ein Weinexperte. Analysiere dieses Foto eines Weins.
 Extrahiere alle erkennbaren Informationen und antworte NUR mit diesem JSON:
 {
-  "name":         {"value": "Name des Weins",  "confidence": "high|mid|low|none"},
-  "weingut":      {"value": "Weingut",         "confidence": "high|mid|low|none"},
-  "weintyp":      {"value": "Rot|Weiss|Rose|Orange|Sekt", "confidence": "high|mid|low|none"},
-  "traubensorten":{"value": "Rebsorte(n)",     "confidence": "high|mid|low|none"},
-  "jahrgang":     {"value": 2019,              "confidence": "high|mid|low|none"},
-  "alkohol":      {"value": 13.5,              "confidence": "high|mid|low|none"},
-  "fuellmenge":   {"value": "75 cl",           "confidence": "high|mid|low|none"},
-  "land":         {"value": "Schweiz",         "confidence": "high|mid|low|none"},
-  "region":       {"value": "Wallis",          "confidence": "high|mid|low|none"},
-  "appellation":  {"value": "Valais AOC",      "confidence": "high|mid|low|none"},
-  "qualitaetsstufe":{"value": "AOC",           "confidence": "high|mid|low|none"}
+  "name":         {"value": "Name des Weins",  "confidence": "high|mid|low|inferred|none"},
+  "weingut":      {"value": "Weingut",         "confidence": "high|mid|low|inferred|none"},
+  "weintyp":      {"value": "Rot|Weiss|Rose|Orange|Sekt", "confidence": "high|mid|low|inferred|none"},
+  "traubensorten":{"value": "Rebsorte(n)",     "confidence": "high|mid|low|inferred|none"},
+  "jahrgang":     {"value": 2019,              "confidence": "high|mid|low|inferred|none"},
+  "alkohol":      {"value": 13.5,              "confidence": "high|mid|low|inferred|none"},
+  "fuellmenge":   {"value": "75 cl",           "confidence": "high|mid|low|inferred|none"},
+  "land":         {"value": "Schweiz",         "confidence": "high|mid|low|inferred|none"},
+  "region":       {"value": "Wallis",          "confidence": "high|mid|low|inferred|none"},
+  "appellation":  {"value": "Valais AOC",      "confidence": "high|mid|low|inferred|none"},
+  "qualitaetsstufe":{"value": "AOC",           "confidence": "high|mid|low|inferred|none"}
 }
-Regeln: confidence "high"=klar lesbar, "mid"=erkennbar, "low"=Schaetzung, "none"=nicht erkennbar->null
+Konfidenz: "high"=klar lesbar, "mid"=erkennbar, "low"=Schaetzung, "inferred"=aus Weinwissen abgeleitet, "none"=unbekannt->null
+WICHTIG: Fehlende Felder mit "inferred" aus Weinwissen ergaenzen!
 fuellmenge in cl, jahrgang+alkohol als Zahl, weintyp: Rot/Weiss/Rose/Orange/Sekt`;
 
   const makeReq = async (model) => {
@@ -1034,20 +1035,22 @@ function applyVisionToForm(result) {
 
   // Farben je Konfidenz und Modus
   const colors = {
-    high: isDark ? '#86efac' : '#15803d',   // grün — sicher
-    mid:  isDark ? '#fde68a' : '#92400e',   // gelb — prüfen
-    low:  isDark ? '#fca5a5' : '#b91c1c',   // rot — unsicher
+    high:     isDark ? '#86efac' : '#15803d',
+    mid:      isDark ? '#fde68a' : '#92400e',
+    low:      isDark ? '#fca5a5' : '#b91c1c',
+    inferred: isDark ? '#c4b5fd' : '#6d28d9',
     none: null,
   };
   const bgColors = {
-    high: isDark ? 'rgba(22,163,74,0.12)'  : 'rgba(22,163,74,0.08)',
-    mid:  isDark ? 'rgba(234,179,8,0.18)'  : 'rgba(234,179,8,0.15)',
-    low:  isDark ? 'rgba(239,68,68,0.18)'  : 'rgba(239,68,68,0.10)',
+    high:     isDark ? 'rgba(22,163,74,0.12)'  : 'rgba(22,163,74,0.08)',
+    mid:      isDark ? 'rgba(234,179,8,0.18)'  : 'rgba(234,179,8,0.15)',
+    low:      isDark ? 'rgba(239,68,68,0.18)'  : 'rgba(239,68,68,0.10)',
+    inferred: isDark ? 'rgba(139,92,246,0.15)' : 'rgba(109,40,217,0.07)',
     none: null,
   };
 
-  let highCount = 0, midCount = 0, lowCount = 0, noneCount = 0;
-  const pending = []; // Felder mit low/none für zweiten Durchlauf
+  let highCount=0, midCount=0, lowCount=0, inferredCount=0, noneCount=0;
+  const pending = [];
 
   for (const [key, fieldId] of Object.entries(FIELD_MAP_VISION)) {
     const data = result[key];
@@ -1067,18 +1070,20 @@ function applyVisionToForm(result) {
     }
 
     if (conf === 'high' || conf === 'mid') {
-      // Wert einsetzen — auch bestehende überschreiben (Foto ist Quelle der Wahrheit)
       el.value = val;
       el.style.borderColor = colors[conf];
       el.style.background  = bgColors[conf];
       if (conf === 'high') highCount++; else { midCount++; pending.push(key); }
+    } else if (conf === 'inferred') {
+      if (!el.value.trim()) el.value = val;
+      el.style.borderColor = colors.inferred;
+      el.style.background  = bgColors.inferred;
+      inferredCount++; pending.push(key);
     } else if (conf === 'low') {
-      // Nur einsetzen wenn leer, gelb markieren
       if (!el.value.trim()) el.value = val;
       el.style.borderColor = colors.low;
       el.style.background  = bgColors.low;
-      lowCount++;
-      pending.push(key);
+      lowCount++; pending.push(key);
     }
   }
 
@@ -1086,17 +1091,19 @@ function applyVisionToForm(result) {
 
   // Summary Panel
   const summaryParts = [];
-  if (highCount) summaryParts.push(`<span style="color:${colors.high}">&#9632; ${highCount} sicher</span>`);
-  if (midCount)  summaryParts.push(`<span style="color:${colors.mid}">&#9632; ${midCount} prüfen (gelb)</span>`);
-  if (lowCount)  summaryParts.push(`<span style="color:${colors.low}">&#9632; ${lowCount} unsicher (rot)</span>`);
-  if (noneCount) summaryParts.push(`<span style="color:var(--muted)">${noneCount} nicht erkannt</span>`);
+  if (highCount)     summaryParts.push(`<span style="color:${colors.high}">&#9632; ${highCount} sicher</span>`);
+  if (midCount)      summaryParts.push(`<span style="color:${colors.mid}">&#9632; ${midCount} prüfen</span>`);
+  if (inferredCount) summaryParts.push(`<span style="color:${colors.inferred}">&#9632; ${inferredCount} KI-Wissen</span>`);
+  if (lowCount)      summaryParts.push(`<span style="color:${colors.low}">&#9632; ${lowCount} unsicher</span>`);
+  if (noneCount)     summaryParts.push(`<span style="color:var(--muted)">${noneCount} nicht erkannt</span>`);
 
   draftDiv.innerHTML = `
     <div style="font-size:.8rem;font-weight:700;margin-bottom:6px">🤖 Gemini Vision Analyse:</div>
     <div style="font-size:.78rem;display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px">${summaryParts.join(' &nbsp;&middot;&nbsp; ')}</div>
     <div style="font-size:.75rem;color:var(--muted)">
-      🟢 Grün = sicher übernommen  |  🟡 Gelb = bitte prüfen  |  🔴 Rot = unsicher, bitte korrigieren
-    </div>`;
+      🟢 sicher  |  🟡 prüfen  |  🟣 KI-Wissen*  |  🔴 unsicher
+    </div>
+    ${inferredCount ? `<div style="font-size:.72rem;color:${colors.inferred};margin-top:3px">* Violett = KI-Wissen (abgeleitet)</div>` : ''}` ;
 
   if (pending.length) {
     geminiStatusEl.innerHTML = `<span style="color:var(--muted);font-size:.78rem">Markierte Felder ergänzen, dann erneut an Gemini senden:</span>`;
