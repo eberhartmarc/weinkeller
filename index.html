@@ -754,9 +754,8 @@ function saveConfig() {
 // GEMINI API KEY VERWALTUNG
 // ----------------------------------------------------------------
 const APP_VERSION = 'v2.1.2';
-const _GEMINI_DEFAULT = 'AIzaSyCFwbj2C6J7cjFsRvw-LmKY-aT9jgCtVbo';
 function getGeminiKey() {
-  try { return localStorage.getItem('wk-gemini-key') || _GEMINI_DEFAULT; } catch(e) { return _GEMINI_DEFAULT; }
+  try { return localStorage.getItem('wk-gemini-key') || null; } catch(e) { return null; }
 }
 
 function saveGeminiKey() {
@@ -3009,10 +3008,6 @@ async function inKellerUebernehmen(rowKey) {
   document.getElementById('theme-lbl').textContent=dark?'Hellmodus':'Dunkelmodus';
   // Versionsnummer aus Konstante überall einsetzen
   document.querySelectorAll('[id^="ver-"]').forEach(el => el.textContent = APP_VERSION);
-  // Gemini Default vorausfüllen falls noch kein Key im localStorage
-  if(!localStorage.getItem('wk-gemini-key')) {
-    try { localStorage.setItem('wk-gemini-key', _GEMINI_DEFAULT); } catch(e){}
-  }
   // Auth starten
   initGoogleAuth();
 })();
